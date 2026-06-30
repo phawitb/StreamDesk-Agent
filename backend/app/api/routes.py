@@ -247,7 +247,7 @@ async def websocket_endpoint(ws: WebSocket):
 
             elif msg.get("type") == "media_control":
                 action = msg.get("action", "")
-                value = float(msg.get("value", 0))
+                value = float(msg.get("value") or 0)
                 if action == "get_status":
                     async def _send_status(target_ws=ws):
                         try:
@@ -258,6 +258,8 @@ async def websocket_endpoint(ws: WebSocket):
                                         "currentTime": status.get("position", 0),
                                         "duration": status.get("duration", 0),
                                         "paused": not status.get("playing", False),
+                                        "volume": status.get("volume", 50),
+                                        "muted": status.get("muted", False),
                                     })},
                                     ensure_ascii=False,
                                 ))
@@ -274,6 +276,14 @@ async def websocket_endpoint(ws: WebSocket):
                     await monitor.seek_backward(int(value) or 10)
                 elif action == "seek_to":
                     await monitor.seek_to(value)
+                elif action == "volume_up":
+                    await monitor.volume_up(int(value) or 10)
+                elif action == "volume_down":
+                    await monitor.volume_down(int(value) or 10)
+                elif action == "mute":
+                    await monitor.mute()
+                elif action == "unmute":
+                    await monitor.unmute()
 
     except WebSocketDisconnect:
         if ws in _connections:

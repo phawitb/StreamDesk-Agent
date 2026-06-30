@@ -40,7 +40,7 @@ class HD24Agent(BaseSiteAgent):
 
     @staticmethod
     def can_handle(url: str) -> bool:
-        return "24hd.net" in url
+        return "24hd.net" in url or "24hd.vip" in url
 
     async def navigate_and_play(self, url: str) -> None:
         # Initialize self-healing helper

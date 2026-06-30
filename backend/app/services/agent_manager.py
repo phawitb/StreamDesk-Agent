@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import re
+from pathlib import Path
 from typing import Optional, Callable, Awaitable
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
@@ -8,6 +10,12 @@ from app.config import settings
 from app.agents.base import BaseSiteAgent
 from app.agents.registry import get_agent_for_url
 from app.services.monitor import monitor
+
+DOWNLOADS_DIR = Path(__file__).parent.parent.parent / "downloads"
+DOWNLOADS_DIR.mkdir(exist_ok=True)
+
+YOUTUBE_RE = re.compile(r'(youtube\.com|youtu\.be)')
+BILIBILI_RE = re.compile(r'(bilibili\.com|bilibili\.tv|b23\.tv)')
 
 # Import site agents to trigger registration
 import app.agents.sites.hd24  # noqa: F401
@@ -160,7 +168,128 @@ class AgentManager:
                 logger.info("Captured m3u8: %s", url[:120])
 
     async def play(self, url: str):
-        """Navigate to URL headlessly, capture m3u8, and send to monitor."""
+        """Play a URL — route to YouTube, Bilibili, or site agent."""
+        if YOUTUBE_RE.search(url):
+            await self._play_youtube(url)
+        elif BILIBILI_RE.search(url):
+            await self._play_with_ytdlp(url, "Bilibili")
+        else:
+            await self._play_site(url)
+
+    async def _play_youtube(self, url: str):
+        """YouTube: download with yt-dlp then play from local file."""
+        await self._report("launching", "กำลังเปิด YouTube...")
+
+        if not monitor.connected:
+            await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
+            return
+
+        title = await self._get_title_ytdlp(url)
+        await self._report("loading_player", f"กำลังดาวน์โหลด: {title}...")
+
+        local_path = await self._download_ytdlp(url)
+        if not local_path:
+            await self._report("error", "ดาวน์โหลดไม่สำเร็จ")
+            return
+
+        filename = local_path.name
+        local_url = f"http://localhost:{settings.port}/downloads/{filename}"
+        await monitor.open_url(local_url, title)
+        await self._report("playing", f"กำลังเล่น: {title}")
+
+    async def _play_with_ytdlp(self, url: str, platform_name: str = "Video"):
+        """Download video using yt-dlp and play from local file."""
+        await self._report("launching", f"กำลังเปิด {platform_name}...")
+
+        if not monitor.connected:
+            await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
+            return
+
+        title = await self._get_title_ytdlp(url)
+        await self._report("loading_player", f"กำลังดาวน์โหลด: {title}...")
+
+        local_path = await self._download_ytdlp(url)
+        if local_path:
+            filename = local_path.name
+            local_url = f"http://localhost:{settings.port}/downloads/{filename}"
+            await monitor.open_url(local_url, title)
+            await self._report("playing", f"กำลังเล่น: {title}")
+        else:
+            await self._report("error", "ดาวน์โหลดไม่สำเร็จ")
+
+    async def _get_title_ytdlp(self, url: str) -> str:
+        """Get video title using yt-dlp."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "yt-dlp", "--get-title", "--no-playlist", url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+            title = stdout.decode().strip()
+            return title if title else url
+        except Exception as e:
+            logger.warning("yt-dlp get-title failed: %s", e)
+            return url
+
+    async def _extract_stream_ytdlp(self, url: str) -> Optional[str]:
+        """Extract direct stream URL using yt-dlp."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "yt-dlp", "-g", "-f", "best[ext=mp4]/best", "--no-playlist", url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            stream_url = stdout.decode().strip().split("\n")[0]
+            if stream_url and stream_url.startswith("http"):
+                logger.info("yt-dlp extracted: %s", stream_url[:120])
+                return stream_url
+        except Exception as e:
+            logger.warning("yt-dlp extract failed: %s", e)
+        return None
+
+    async def _download_ytdlp(self, url: str) -> Optional[Path]:
+        """Download video using yt-dlp to local file."""
+        output_template = str(DOWNLOADS_DIR / "%(id)s.%(ext)s")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "yt-dlp",
+                "-f", "bv*+ba/b",  # best video+audio merged, fallback to best single
+                "--merge-output-format", "mp4",
+                "--no-playlist",
+                "--print", "after_move:filepath",
+                "-o", output_template,
+                url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+
+            if proc.returncode != 0:
+                logger.error("yt-dlp download failed: %s", stderr.decode()[:500])
+                return None
+
+            # --print after_move:filepath outputs the final path as the last line
+            filepath = stdout.decode().strip().split("\n")[-1].strip()
+            if filepath and Path(filepath).exists():
+                logger.info("Downloaded: %s", filepath)
+                return Path(filepath)
+
+            # Fallback: find newest mp4 in downloads dir
+            files = sorted(DOWNLOADS_DIR.glob("*.mp4"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if files:
+                logger.info("Downloaded (fallback): %s", files[0])
+                return files[0]
+
+        except asyncio.TimeoutError:
+            logger.error("yt-dlp download timed out (10min)")
+        except Exception as e:
+            logger.error("yt-dlp download error: %s", e)
+        return None
+
+    async def _play_site(self, url: str):
+        """Navigate to URL with Playwright, capture m3u8, and send to monitor."""
         await self._report("launching", "กำลังเปิด browser...")
 
         agent_cls = get_agent_for_url(url)
@@ -202,7 +331,6 @@ class AgentManager:
                         break
 
             if self._captured_m3u8:
-                # Use the last m3u8 (usually the actual movie, not ads)
                 m3u8_url = self._captured_m3u8[-1]
                 logger.info("Sending m3u8 to monitor: %s", m3u8_url[:120])
 
@@ -219,7 +347,6 @@ class AgentManager:
             logger.exception("Agent error")
             await self._report("error", f"เกิดข้อผิดพลาด: {str(e)}")
         finally:
-            # Close browser — no longer needed after m3u8 is sent to monitor
             await self._close_browser()
 
     async def download(self):

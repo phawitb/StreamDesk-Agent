@@ -72,6 +72,7 @@
         let volumeTimeout, toastTimeout;
         let currentMediaUrl = '';
         let currentMediaTitle = '';
+
         let mode = 'none'; // 'none' | 'video' | 'embed'
 
         const idleScreen = document.getElementById('idle-screen');
@@ -80,29 +81,6 @@
         const embedPlayer = document.getElementById('embed-player');
         const toast = document.getElementById('toast');
         const connStatus = document.getElementById('connection-status');
-
-        // Audio unlock
-        let audioUnlocked = false;
-        let pendingCmd = null;
-        function unlockAudio() {
-            if (audioUnlocked) return;
-            audioUnlocked = true;
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                ctx.resume().then(() => ctx.close());
-            } catch (e) {}
-            if (mode === 'video' && !videoPlayer.paused && videoPlayer.muted && !isMuted) {
-                videoPlayer.muted = false;
-                showToast(currentMediaTitle || 'Playing');
-            }
-            if (pendingCmd) {
-                const cmd = pendingCmd;
-                pendingCmd = null;
-                handleCommand(cmd);
-            }
-        }
-        document.addEventListener('click', unlockAudio);
-        document.addEventListener('touchstart', unlockAudio);
 
         connect();
 
@@ -124,7 +102,7 @@
                 case 'OPEN_URL':
                     currentMediaUrl = cmd.url || '';
                     currentMediaTitle = cmd.title || '';
-                    openMedia(cmd.url);
+                    openMedia(cmd.url, cmd.platform || '');
                     if (cmd.title) showToast(cmd.title);
                     break;
                 case 'PLAY':        doPlay(); showToast('Playing'); break;
@@ -142,13 +120,20 @@
             reportStatus();
         }
 
-        function openMedia(url) {
+        // ── Open media ──
+
+        function openMedia(url, platform) {
             idleScreen.classList.add('hidden');
             cleanup();
 
-            // m3u8 or direct video URL
-            openDirectVideo(url);
+            if (platform === 'embed') {
+                openEmbed(url);
+            } else {
+                openDirectVideo(url);
+            }
         }
+
+        // ── Direct video (mp4, m3u8, local files) ──
 
         function openDirectVideo(url) {
             mode = 'video';
@@ -158,22 +143,28 @@
             videoPlayer.volume = currentVolume / 100;
             videoPlayer.src = url;
 
-            if (audioUnlocked) {
-                videoPlayer.muted = isMuted;
-                videoPlayer.play().catch(e => {
-                    console.error('Play error:', e.message);
-                    showToast('Tap screen to play');
-                });
-            } else {
-                videoPlayer.muted = true;
-                videoPlayer.play().then(() => {
-                    showToast('Tap screen to enable audio');
-                }).catch(e => {
-                    pendingCmd = { action: 'OPEN_URL', url: url };
-                    showToast('Tap screen to play');
-                });
-            }
+            videoPlayer.muted = isMuted;
+            videoPlayer.play().then(() => {
+                // Enter fullscreen on the video element
+                if (!document.fullscreenElement) {
+                    (videoPlayer.requestFullscreen || videoPlayer.webkitRequestFullscreen || function(){}).call(videoPlayer);
+                }
+            }).catch(e => {
+                console.error('Play error:', e.message);
+            });
         }
+
+        // ── Embed player (iframe) ──
+
+        function openEmbed(url) {
+            mode = 'embed';
+            mediaContainer.classList.remove('hidden');
+            videoPlayer.classList.add('hidden');
+            embedPlayer.classList.remove('hidden');
+            embedPlayer.src = url;
+        }
+
+        // ── Cleanup ──
 
         function cleanup() {
             videoPlayer.pause();
@@ -183,18 +174,12 @@
             embedPlayer.removeAttribute('src');
         }
 
+        // ── Playback controls ──
+
         function doPlay() {
             if (mode === 'video') {
-                if (audioUnlocked) {
-                    videoPlayer.muted = isMuted;
-                    videoPlayer.play().catch(e => showToast('Tap screen to play'));
-                } else {
-                    videoPlayer.muted = true;
-                    videoPlayer.play().then(() => showToast('Tap screen to enable audio')).catch(e => {
-                        pendingCmd = { action: 'PLAY' };
-                        showToast('Tap screen to play');
-                    });
-                }
+                videoPlayer.muted = isMuted;
+                videoPlayer.play().catch(() => {});
             }
         }
 
@@ -226,10 +211,8 @@
 
         function doVolume(delta) {
             currentVolume = Math.max(0, Math.min(100, currentVolume + delta));
-            isMuted = false;
             if (mode === 'video') {
                 videoPlayer.volume = currentVolume / 100;
-                videoPlayer.muted = false;
             }
             showVolumeOverlay();
         }
@@ -240,7 +223,8 @@
             showToast(mute ? 'Muted' : 'Unmuted');
         }
 
-        // Status report every 1s
+        // ── Helpers ──
+
         function reportStatus() {
             if (!ws || ws.readyState !== WebSocket.OPEN) return;
             let playing = false, duration = 0, position = 0;

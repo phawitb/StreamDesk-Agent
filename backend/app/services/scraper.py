@@ -81,7 +81,7 @@ async def scrape_movies(page: int = 1, category: str = "", search: str = "") -> 
         if not link_el:
             continue
         href = link_el.get("href", "")
-        if not href or href == "#" or BASE_URL not in href:
+        if not href or href == "#" or "24hd" not in href:
             continue
 
         # Extract title from heading

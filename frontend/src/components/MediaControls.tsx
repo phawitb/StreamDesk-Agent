@@ -8,6 +8,8 @@ interface MediaStatus {
   currentTime: number;
   duration: number;
   paused: boolean;
+  volume: number;
+  muted: boolean;
 }
 
 function formatTime(seconds: number): string {
@@ -24,6 +26,8 @@ export function MediaControls({ onMediaControl }: Props) {
     currentTime: 0,
     duration: 0,
     paused: false,
+    volume: 50,
+    muted: false,
   });
   const [dragging, setDragging] = useState(false);
   const [dragTime, setDragTime] = useState(0);
@@ -46,6 +50,8 @@ export function MediaControls({ onMediaControl }: Props) {
           currentTime: data.currentTime || 0,
           duration: data.duration || 0,
           paused: data.paused ?? false,
+          volume: data.volume ?? 50,
+          muted: data.muted ?? false,
         });
       }
     };
@@ -168,6 +174,22 @@ export function MediaControls({ onMediaControl }: Props) {
         </button>
         <button style={btnStyle} onClick={() => onMediaControl("seek_forward", 30)} title="+30s">
           +30
+        </button>
+
+        <div style={{ width: 1, height: 24, background: "#45475a", margin: "0 4px" }} />
+
+        <button style={btnStyle} onClick={() => onMediaControl("volume_down", 10)} title="Volume -">
+          🔉
+        </button>
+        <button
+          style={{ ...btnStyle, fontSize: 16, minWidth: 44 }}
+          onClick={() => onMediaControl(status.muted ? "unmute" : "mute")}
+          title={status.muted ? "Unmute" : "Mute"}
+        >
+          {status.muted ? "🔇" : "🔊"}
+        </button>
+        <button style={btnStyle} onClick={() => onMediaControl("volume_up", 10)} title="Volume +">
+          🔈+
         </button>
       </div>
     </div>
