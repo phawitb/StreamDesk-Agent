@@ -74,19 +74,27 @@ class HD24Agent(BaseSiteAgent):
                 await self._report("error", "ไม่พบ video player")
             return
 
-        # Click play to start — first click may open popup, second actually plays
+        # Click play to start — use JS play() to avoid hitting pause on the video
         await self._report("loading_player", "กำลังกดเล่น...")
-        await frame.click("body", timeout=5000)
+        await frame.evaluate("""() => {
+            const v = document.querySelector('video');
+            if (v) { v.muted = true; v.play().catch(() => {}); }
+            // Also try clicking the JWPlayer display icon (big play button)
+            const playBtn = document.querySelector('.jw-display-icon-container');
+            if (playBtn) playBtn.click();
+        }""")
         await asyncio.sleep(2)
         await self._close_popups()
 
-        # Try clicking again in case first click was consumed by popup
-        try:
-            await frame.click("body", timeout=3000)
-            await asyncio.sleep(1)
-            await self._close_popups()
-        except Exception:
-            pass
+        # If video still not playing, try clicking body once
+        is_paused = await frame.evaluate("() => { const v = document.querySelector('video'); return v ? v.paused : true; }")
+        if is_paused:
+            try:
+                await frame.click("body", timeout=3000)
+                await asyncio.sleep(1)
+                await self._close_popups()
+            except Exception:
+                pass
 
         # Skip all VAST pre-roll ads
         await self._skip_all_ads_and_wait(frame)
@@ -99,16 +107,19 @@ class HD24Agent(BaseSiteAgent):
             await self._switch_to_backup()
             frame = await self._get_player_frame()
             if frame:
-                await frame.click("body", timeout=5000)
+                await frame.evaluate("""() => {
+                    const v = document.querySelector('video');
+                    if (v) { v.muted = true; v.play().catch(() => {}); }
+                    const playBtn = document.querySelector('.jw-display-icon-container');
+                    if (playBtn) playBtn.click();
+                }""")
                 await asyncio.sleep(3)
                 await self._close_popups()
                 await self._skip_all_ads_and_wait(frame)
                 is_movie = await self._is_movie_playing(frame)
 
         if is_movie:
-            await self._report("loading_player", "หนังเริ่มเล่นแล้ว กำลังขยายเต็มจอ...")
-            await self._enter_fullscreen(frame)
-            await self._report("playing", f"กำลังเล่น: {title}")
+            await self._report("loading_player", f"จับ stream ได้แล้ว: {title}")
         else:
             # Self-healing: analyze why it failed
             analysis = await self._healer.analyze_page()
@@ -291,6 +302,26 @@ class HD24Agent(BaseSiteAgent):
         gemini_skip_used = False
 
         for round_num in range(30):
+            # Debug: log full ad state
+            ad_debug = await frame.evaluate("""() => {
+                const player = document.querySelector('.jwplayer');
+                const skip = document.querySelector('.jw-skip');
+                const video = document.querySelector('video');
+                return {
+                    hasPlayer: !!player,
+                    playerClasses: player ? Array.from(player.classList).filter(c => c.includes('ad') || c.includes('flag')).join(' ') : '',
+                    hasSkip: !!skip,
+                    skipText: skip ? skip.innerText.trim() : '',
+                    skipDisplay: skip ? window.getComputedStyle(skip).display : '',
+                    skipVisibility: skip ? window.getComputedStyle(skip).visibility : '',
+                    skipRect: skip ? (() => { const r = skip.getBoundingClientRect(); return `${r.x},${r.y} ${r.width}x${r.height}`; })() : '',
+                    videoDuration: video ? video.duration : 0,
+                    videoPaused: video ? video.paused : true,
+                    videoTime: video ? video.currentTime : 0,
+                };
+            }""")
+            logger.info("Ad debug round %d: %s", round_num, ad_debug)
+
             # Check if skip button is visible (normal way)
             has_skip = await frame.evaluate("""() => {
                 const skip = document.querySelector('.jw-skip');
@@ -304,22 +335,44 @@ class HD24Agent(BaseSiteAgent):
                 ads_skipped += 1
                 await self._report("loading_player", f"กำลังข้ามโฆษณา {ads_skipped}...")
 
-                # Wait for countdown
+                # Wait for countdown — ensure ad video is playing
                 for wait_sec in range(25):
-                    text = await frame.evaluate("""() => {
+                    state = await frame.evaluate("""() => {
                         const el = document.querySelector('.jw-skip');
-                        return el ? el.innerText : '';
+                        const v = document.querySelector('video');
+                        const text = el ? el.innerText : '';
+                        const paused = v ? v.paused : false;
+                        // If video is paused, resume it so countdown progresses
+                        if (v && paused) {
+                            v.play().catch(() => {});
+                        }
+                        return { text, paused };
                     }""")
+                    text = state.get("text", "")
+                    if state.get("paused"):
+                        logger.info("Ad video was paused, resumed it")
                     if text and "ใน" not in text:
                         break
                     if wait_sec % 3 == 0 and text:
                         await self._report("loading_player", f"รอข้ามโฆษณา: {text.strip()}")
                     await asyncio.sleep(1)
 
-                # Click skip
+                # Click skip — use evaluate to click the exact element
                 try:
-                    await frame.locator(".jw-skip").first.click(force=True, timeout=2000)
-                    logger.info("Skipped ad %d", ads_skipped)
+                    click_info = await frame.evaluate("""() => {
+                        const skip = document.querySelector('.jw-skip');
+                        if (!skip) return { clicked: false, reason: 'not found' };
+                        const rect = skip.getBoundingClientRect();
+                        const text = skip.innerText.trim();
+                        const style = window.getComputedStyle(skip);
+                        // Only click if it's actually the skip button (visible, has text)
+                        if (style.display === 'none' || style.visibility === 'hidden') {
+                            return { clicked: false, reason: 'hidden', text, rect: {x: rect.x, y: rect.y, w: rect.width, h: rect.height} };
+                        }
+                        skip.click();
+                        return { clicked: true, text, rect: {x: rect.x, y: rect.y, w: rect.width, h: rect.height} };
+                    }""")
+                    logger.info("Skip ad %d result: %s", ads_skipped, click_info)
                     await self._close_popups()
                     await asyncio.sleep(2)
                 except Exception as e:

@@ -7,6 +7,7 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from app.config import settings
 from app.agents.base import BaseSiteAgent
 from app.agents.registry import get_agent_for_url
+from app.services.monitor import monitor
 
 # Import site agents to trigger registration
 import app.agents.sites.hd24  # noqa: F401
@@ -50,6 +51,7 @@ class AgentManager:
         self._status_callback: Optional[Callable[[str, str], Awaitable[None]]] = None
         self._captured_m3u8: list[str] = []
         self._current_url: Optional[str] = None
+        self._current_title: Optional[str] = None
         self._episode_future: Optional[asyncio.Future] = None
         self._episode_callback: Optional[Callable] = None
 
@@ -58,7 +60,6 @@ class AgentManager:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=settings.headless,
-            slow_mo=settings.browser_slow_mo,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
@@ -86,7 +87,7 @@ class AgentManager:
         self._episode_callback = callback
 
     async def wait_for_episode_selection(self, episodes: list[dict]) -> int:
-        """Send episode list to frontend and wait for user selection. Returns episode index."""
+        """Send episode list to frontend and wait for user selection."""
         if self._episode_callback:
             await self._episode_callback(episodes)
         self._episode_future = asyncio.get_event_loop().create_future()
@@ -95,7 +96,6 @@ class AgentManager:
         return selected
 
     def select_episode(self, index: int):
-        """Called when user selects an episode from the frontend."""
         if self._episode_future and not self._episode_future.done():
             self._episode_future.set_result(index)
 
@@ -133,8 +133,19 @@ class AgentManager:
 
         return self._context
 
+    async def _close_browser(self):
+        """Close browser context and page after m3u8 is captured."""
+        self._current_agent = None
+        if self._context:
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+            self._context = None
+        self._page = None
+        logger.info("Browser context closed (m3u8 sent to monitor)")
+
     async def _handle_popup(self, page: Page):
-        """Close popup windows opened by ads."""
         await asyncio.sleep(0.5)
         if page != self._page:
             logger.info("Closing popup: %s", page.url)
@@ -149,18 +160,18 @@ class AgentManager:
                 logger.info("Captured m3u8: %s", url[:120])
 
     async def play(self, url: str):
-        """Navigate to URL and play video using the appropriate site agent."""
+        """Navigate to URL headlessly, capture m3u8, and send to monitor."""
         await self._report("launching", "กำลังเปิด browser...")
 
-        # Find the right agent
         agent_cls = get_agent_for_url(url)
         if not agent_cls:
             await self._report("error", f"ไม่รองรับเว็บไซต์: {url}")
             return
 
-        # Reset captured URLs
+        # Reset
         self._captured_m3u8 = []
         self._current_url = url
+        self._current_title = None
 
         # Create fresh context and page
         context = await self._create_context()
@@ -174,9 +185,42 @@ class AgentManager:
 
         try:
             await self._current_agent.navigate_and_play(url)
+
+            # Get title
+            try:
+                raw_title = await self._page.title()
+                self._current_title = raw_title.split(" ดูหนัง")[0].split(" - ")[0].strip() or raw_title[:80]
+            except Exception:
+                self._current_title = "Movie"
+
+            # Wait a bit for m3u8 to be captured
+            if not self._captured_m3u8:
+                await self._report("loading_player", "รอจับ URL สตรีม...")
+                for _ in range(15):
+                    await asyncio.sleep(1)
+                    if self._captured_m3u8:
+                        break
+
+            if self._captured_m3u8:
+                # Use the last m3u8 (usually the actual movie, not ads)
+                m3u8_url = self._captured_m3u8[-1]
+                logger.info("Sending m3u8 to monitor: %s", m3u8_url[:120])
+
+                if not monitor.connected:
+                    await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
+                    return
+
+                await monitor.open_url(m3u8_url, self._current_title)
+                await self._report("playing", f"กำลังเล่น: {self._current_title}")
+            else:
+                await self._report("error", "ไม่พบ stream URL จากหน้าเว็บ")
+
         except Exception as e:
             logger.exception("Agent error")
             await self._report("error", f"เกิดข้อผิดพลาด: {str(e)}")
+        finally:
+            # Close browser — no longer needed after m3u8 is sent to monitor
+            await self._close_browser()
 
     async def download(self):
         """Download the currently playing video."""
@@ -186,24 +230,10 @@ class AgentManager:
             await self._report("error", "ไม่พบ m3u8 URL สำหรับดาวน์โหลด กรุณาเล่นหนังก่อน")
             return
 
-        # Use the last m3u8 (usually the actual movie, not ads)
         m3u8_url = self._captured_m3u8[-1]
-        logger.info("Downloading from: %s", m3u8_url)
-
-        # Get title from page
-        title = "movie"
-        if self._page:
-            try:
-                raw_title = await self._page.title()
-                # Clean up title — remove site name suffix
-                title = raw_title.split(" ดูหนัง")[0].split(" - ")[0].strip()
-                if not title:
-                    title = raw_title[:50]
-            except Exception:
-                pass
+        title = self._current_title or "movie"
 
         await self._report("loading_player", f"เริ่มดาวน์โหลด: {title}")
-
         result = await download_hls(m3u8_url, title, self._report)
         if result:
             await self._report("playing", f"ดาวน์โหลดเสร็จ: {result}")
@@ -214,64 +244,56 @@ class AgentManager:
             await self._current_agent.stop()
             await self._report("idle", "หยุดเล่นแล้ว")
 
-    async def _run_video_js(self, js_code: str) -> any:
-        """Execute JS on the video element inside the player iframe."""
-        if not self._page:
-            return None
-        # Find the video in any frame
-        for frame in self._page.frames:
+    async def reset(self):
+        """Kill all running processes, close browser context, reset state."""
+        logger.info("Resetting agent manager...")
+
+        # Cancel pending episode selection
+        if self._episode_future and not self._episode_future.done():
+            self._episode_future.cancel()
+        self._episode_future = None
+
+        # Stop current agent
+        if self._current_agent:
             try:
-                result = await frame.evaluate(f"""() => {{
-                    const v = document.querySelector('video');
-                    if (!v) return null;
-                    {js_code}
-                }}""")
-                if result is not None:
-                    return result
+                await self._current_agent.stop()
             except Exception:
-                continue
-        return None
+                pass
+            self._current_agent = None
+
+        # Close browser context (kills all pages)
+        if self._context:
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+            self._context = None
+
+        self._page = None
+        self._captured_m3u8 = []
+        self._current_url = None
+        self._current_title = None
+
+        # Stop monitor playback
+        await monitor.stop()
+
+        await self._report("idle", "รีเซ็ตเรียบร้อย พร้อมรับคำสั่งใหม่")
+        logger.info("Reset complete")
 
     async def media_control(self, action: str, value: float = 0):
-        """Control video playback: pause, resume, seek_forward, seek_backward, seek_to."""
-        if not self._page:
-            await self._report("error", "ยังไม่ได้เปิดหนัง")
-            return
-
+        """Route media controls through monitor."""
         if action == "pause":
-            await self._run_video_js("v.pause(); return true;")
-            await self._report("playing", "หยุดชั่วคราว ⏸")
-
+            await monitor.pause()
         elif action == "resume":
-            await self._run_video_js("v.play(); return true;")
-            await self._report("playing", "เล่นต่อ ▶")
-
+            await monitor.play()
         elif action == "seek_forward":
-            secs = value or 10
-            await self._run_video_js(f"v.currentTime += {secs}; return true;")
-            await self._report("playing", f"ข้ามไป {secs:.0f} วินาที ⏩")
-
+            await monitor.seek_forward(int(value) or 10)
         elif action == "seek_backward":
-            secs = value or 10
-            await self._run_video_js(f"v.currentTime = Math.max(0, v.currentTime - {secs}); return true;")
-            await self._report("playing", f"ถอยกลับ {secs:.0f} วินาที ⏪")
-
+            await monitor.seek_backward(int(value) or 10)
         elif action == "seek_to":
-            await self._run_video_js(f"v.currentTime = {value}; return true;")
-            mins = int(value) // 60
-            secs = int(value) % 60
-            await self._report("playing", f"ข้ามไปที่ {mins:02d}:{secs:02d}")
-
+            await monitor.seek_to(value)
         elif action == "get_status":
-            info = await self._run_video_js("""
-                return {
-                    currentTime: v.currentTime,
-                    duration: v.duration || 0,
-                    paused: v.paused,
-                };
-            """)
-            return info
-
+            return monitor.status
         return None
 
 

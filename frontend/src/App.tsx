@@ -136,6 +136,23 @@ function App() {
         <span style={{ fontSize: 20 }}>🎬</span>
         <span style={{ fontSize: 16, fontWeight: 600 }}>StreamDesk</span>
         <StatusBar state={currentState} connected={connected} />
+        <div style={{ marginLeft: "auto" }}>
+          <button
+            onClick={() => send({ type: "command", action: "reset" })}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 6,
+              border: "1px solid #f38ba8",
+              background: "transparent",
+              color: "#f38ba8",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Reset
+          </button>
+        </div>
       </div>
 
       {/* Main: Browse left + Chat right */}

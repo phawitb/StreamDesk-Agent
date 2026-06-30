@@ -2,9 +2,10 @@ import asyncio
 import json
 import logging
 import math
-from typing import Optional
+from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 
 from app.schemas.messages import (
     AgentState,
@@ -13,12 +14,15 @@ from app.schemas.messages import (
     ErrorMessage,
 )
 from app.services.agent_manager import agent_manager
+from app.services.monitor import monitor
 from app.services.scraper import scrape_movies, scrape_categories, sync_all_movies
 from app.services.gemini_chat import recommend_movies
 from app.services.database import upsert_movies
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 # Store active WebSocket connections
 _connections: list[WebSocket] = []
@@ -53,8 +57,42 @@ async def status_callback(state: str, message: str):
 
 @router.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "monitor_connected": monitor.connected}
 
+
+# ── Monitor page ──
+
+@router.get("/monitor", response_class=HTMLResponse)
+async def monitor_page():
+    """Serve the monitor HTML page for video playback."""
+    html_path = TEMPLATES_DIR / "monitor.html"
+    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
+@router.websocket("/ws/monitor")
+async def ws_monitor(ws: WebSocket):
+    """WebSocket for the monitor page — receives commands, sends status back."""
+    await ws.accept()
+    await monitor.register(ws)
+    await broadcast(ChatMessage(content="Monitor connected").model_dump())
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                data = json.loads(raw)
+                if data.get("type") == "status":
+                    monitor.update_status(data)
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await monitor.unregister()
+        await broadcast(ChatMessage(content="Monitor disconnected").model_dump())
+
+
+# ── Movie API ──
 
 @router.get("/api/movies")
 async def list_movies(page: int = 1, category: str = ""):
@@ -95,7 +133,7 @@ async def sync_movies():
             logger.info("Full sync complete: %d", total)
         except Exception as e:
             logger.error("Sync failed: %s", e)
-            await broadcast(ChatMessage(content=f"Sync ล้มเหลว: {e}").model_dump())
+            await broadcast(ChatMessage(content=f"Sync failed: {e}").model_dump())
 
     async def status_callback_sync(msg: str):
         await broadcast(ChatMessage(content=msg).model_dump())
@@ -103,6 +141,8 @@ async def sync_movies():
     asyncio.create_task(_run_sync())
     return {"status": "syncing"}
 
+
+# ── Chat / Recommendation ──
 
 async def _handle_recommendation(query: str):
     """Run Gemini recommendation and broadcast results."""
@@ -128,6 +168,8 @@ async def _handle_recommendation(query: str):
             content=f"เกิดข้อผิดพลาดในการค้นหา: {e}"
         ).model_dump())
 
+
+# ── Main WebSocket ──
 
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -175,8 +217,11 @@ async def websocket_endpoint(ws: WebSocket):
 
             elif msg.get("type") == "command":
                 action = msg.get("action")
-                if action == "stop":
+                if action == "reset":
+                    asyncio.create_task(agent_manager.reset())
+                elif action == "stop":
                     await agent_manager.stop_playback()
+                    await monitor.stop()
                 elif action == "download":
                     await broadcast(ChatMessage(
                         content="เริ่มดาวน์โหลด..."
@@ -184,7 +229,17 @@ async def websocket_endpoint(ws: WebSocket):
                     asyncio.create_task(agent_manager.download())
                 elif action in ("pause", "resume", "seek_forward", "seek_backward", "seek_to"):
                     value = float(msg.get("value", 0))
-                    asyncio.create_task(agent_manager.media_control(action, value))
+                    # Route media controls through monitor
+                    if action == "pause":
+                        await monitor.pause()
+                    elif action == "resume":
+                        await monitor.play()
+                    elif action == "seek_forward":
+                        await monitor.seek_forward(int(value) or 10)
+                    elif action == "seek_backward":
+                        await monitor.seek_backward(int(value) or 10)
+                    elif action == "seek_to":
+                        await monitor.seek_to(value)
 
             elif msg.get("type") == "select_episode":
                 index = int(msg.get("index", 0))
@@ -194,23 +249,35 @@ async def websocket_endpoint(ws: WebSocket):
                 action = msg.get("action", "")
                 value = float(msg.get("value", 0))
                 if action == "get_status":
-                    # Run in background so it doesn't block the receive loop
                     async def _send_status(target_ws=ws):
                         try:
-                            result = await agent_manager.media_control("get_status", 0)
-                            if result and target_ws.client_state.name == "CONNECTED":
+                            status = monitor.status
+                            if target_ws.client_state.name == "CONNECTED":
                                 await target_ws.send_text(json.dumps(
-                                    {"type": "media_status", **_sanitize_floats(result)},
+                                    {"type": "media_status", **_sanitize_floats({
+                                        "currentTime": status.get("position", 0),
+                                        "duration": status.get("duration", 0),
+                                        "paused": not status.get("playing", False),
+                                    })},
                                     ensure_ascii=False,
                                 ))
                         except Exception:
                             pass
                     asyncio.create_task(_send_status())
-                else:
-                    asyncio.create_task(agent_manager.media_control(action, value))
+                elif action == "pause":
+                    await monitor.pause()
+                elif action == "resume":
+                    await monitor.play()
+                elif action == "seek_forward":
+                    await monitor.seek_forward(int(value) or 10)
+                elif action == "seek_backward":
+                    await monitor.seek_backward(int(value) or 10)
+                elif action == "seek_to":
+                    await monitor.seek_to(value)
 
     except WebSocketDisconnect:
-        _connections.remove(ws)
+        if ws in _connections:
+            _connections.remove(ws)
         logger.info("WebSocket disconnected (total: %d)", len(_connections))
     except Exception as e:
         logger.exception("WebSocket error")

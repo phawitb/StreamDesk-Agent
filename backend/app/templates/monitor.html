@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamDesk Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: -apple-system, sans-serif; }
+
+        #idle-screen {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #0a0a1a 100%);
+            z-index: 5; transition: opacity 0.6s ease;
+        }
+        #idle-screen.hidden { opacity: 0; pointer-events: none; }
+        .logo { width: 80px; height: 80px; border-radius: 20px; background: rgba(99,102,241,0.15); display: flex; align-items: center; justify-content: center; margin-bottom: 24px; }
+        .logo svg { width: 40px; height: 40px; color: #818cf8; }
+        #idle-screen h1 { color: #e2e8f0; font-size: 28px; font-weight: 600; margin-bottom: 8px; }
+        #idle-screen p { color: #64748b; font-size: 16px; }
+        .status-badge { margin-top: 32px; padding: 8px 16px; border-radius: 20px; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); display: flex; align-items: center; gap: 8px; color: #818cf8; font-size: 14px; }
+        .status-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #818cf8; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
+        #media-container { position: absolute; inset: 0; z-index: 10; }
+        #media-container.hidden { display: none; }
+        #video-player { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+        #video-player.hidden { display: none; }
+        #embed-player { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
+        #embed-player.hidden { display: none; }
+
+        #toast { position: fixed; top: 30px; left: 50%; transform: translateX(-50%) translateY(-100px); background: rgba(30,30,50,0.9); backdrop-filter: blur(10px); border: 1px solid rgba(99,102,241,0.3); color: #e2e8f0; padding: 12px 24px; border-radius: 12px; font-size: 16px; z-index: 100; transition: transform 0.4s ease; max-width: 80%; }
+        #toast.show { transform: translateX(-50%) translateY(0); }
+
+        #volume-overlay { position: fixed; right: 40px; top: 50%; transform: translateY(-50%); width: 6px; height: 200px; background: rgba(255,255,255,0.15); border-radius: 3px; z-index: 90; opacity: 0; transition: opacity 0.3s; }
+        #volume-overlay.show { opacity: 1; }
+        #volume-fill { position: absolute; bottom: 0; left: 0; right: 0; background: #818cf8; border-radius: 3px; transition: height 0.2s; }
+        #volume-label { position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%); color: #e2e8f0; font-size: 14px; white-space: nowrap; }
+    </style>
+</head>
+<body>
+    <div id="idle-screen">
+        <div class="logo">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+        </div>
+        <h1>StreamDesk</h1>
+        <p>Waiting for commands...</p>
+        <div class="status-badge">
+            <div class="dot"></div>
+            <span id="connection-status">Connecting...</span>
+        </div>
+    </div>
+
+    <div id="media-container" class="hidden">
+        <video id="video-player" class="hidden" playsinline preload="auto" controls></video>
+        <iframe id="embed-player" class="hidden" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+    </div>
+
+    <div id="toast"></div>
+    <div id="volume-overlay">
+        <div id="volume-fill" style="height: 50%"></div>
+        <div id="volume-label">50%</div>
+    </div>
+
+    <script>
+        let ws;
+        let currentVolume = 50;
+        let isMuted = false;
+        let volumeTimeout, toastTimeout;
+        let currentMediaUrl = '';
+        let currentMediaTitle = '';
+        let mode = 'none'; // 'none' | 'video' | 'embed'
+
+        const idleScreen = document.getElementById('idle-screen');
+        const mediaContainer = document.getElementById('media-container');
+        const videoPlayer = document.getElementById('video-player');
+        const embedPlayer = document.getElementById('embed-player');
+        const toast = document.getElementById('toast');
+        const connStatus = document.getElementById('connection-status');
+
+        // Audio unlock
+        let audioUnlocked = false;
+        let pendingCmd = null;
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            audioUnlocked = true;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                ctx.resume().then(() => ctx.close());
+            } catch (e) {}
+            if (mode === 'video' && !videoPlayer.paused && videoPlayer.muted && !isMuted) {
+                videoPlayer.muted = false;
+                showToast(currentMediaTitle || 'Playing');
+            }
+            if (pendingCmd) {
+                const cmd = pendingCmd;
+                pendingCmd = null;
+                handleCommand(cmd);
+            }
+        }
+        document.addEventListener('click', unlockAudio);
+        document.addEventListener('touchstart', unlockAudio);
+
+        connect();
+
+        function connect() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${location.host}/ws/monitor`);
+            ws.onopen = () => { connStatus.textContent = 'Connected'; };
+            ws.onmessage = (e) => {
+                try { handleCommand(JSON.parse(e.data)); }
+                catch (err) { console.error('Bad msg:', err); }
+            };
+            ws.onclose = () => { connStatus.textContent = 'Reconnecting...'; setTimeout(connect, 3000); };
+            ws.onerror = () => ws.close();
+        }
+
+        function handleCommand(cmd) {
+            console.log('CMD:', cmd.action, cmd);
+            switch (cmd.action) {
+                case 'OPEN_URL':
+                    currentMediaUrl = cmd.url || '';
+                    currentMediaTitle = cmd.title || '';
+                    openMedia(cmd.url);
+                    if (cmd.title) showToast(cmd.title);
+                    break;
+                case 'PLAY':        doPlay(); showToast('Playing'); break;
+                case 'PAUSE':       doPause(); showToast('Paused'); break;
+                case 'STOP':        doStop(); showToast('Stopped'); break;
+                case 'SEEK_FORWARD':  doSeek(cmd.value || 10); showToast(`+${cmd.value||10}s`); break;
+                case 'SEEK_BACKWARD': doSeek(-(cmd.value || 10)); showToast(`-${cmd.value||10}s`); break;
+                case 'SEEK_TO':     doSeekTo(cmd.value || 0); break;
+                case 'VOLUME_UP':   doVolume(cmd.value || 10); break;
+                case 'VOLUME_DOWN': doVolume(-(cmd.value || 10)); break;
+                case 'MUTE':        doMute(true); break;
+                case 'UNMUTE':      doMute(false); break;
+                default:            if (cmd.message) showToast(cmd.message);
+            }
+            reportStatus();
+        }
+
+        function openMedia(url) {
+            idleScreen.classList.add('hidden');
+            cleanup();
+
+            // m3u8 or direct video URL
+            openDirectVideo(url);
+        }
+
+        function openDirectVideo(url) {
+            mode = 'video';
+            mediaContainer.classList.remove('hidden');
+            videoPlayer.classList.remove('hidden');
+            embedPlayer.classList.add('hidden');
+            videoPlayer.volume = currentVolume / 100;
+            videoPlayer.src = url;
+
+            if (audioUnlocked) {
+                videoPlayer.muted = isMuted;
+                videoPlayer.play().catch(e => {
+                    console.error('Play error:', e.message);
+                    showToast('Tap screen to play');
+                });
+            } else {
+                videoPlayer.muted = true;
+                videoPlayer.play().then(() => {
+                    showToast('Tap screen to enable audio');
+                }).catch(e => {
+                    pendingCmd = { action: 'OPEN_URL', url: url };
+                    showToast('Tap screen to play');
+                });
+            }
+        }
+
+        function cleanup() {
+            videoPlayer.pause();
+            videoPlayer.removeAttribute('src');
+            videoPlayer.load();
+            embedPlayer.classList.add('hidden');
+            embedPlayer.removeAttribute('src');
+        }
+
+        function doPlay() {
+            if (mode === 'video') {
+                if (audioUnlocked) {
+                    videoPlayer.muted = isMuted;
+                    videoPlayer.play().catch(e => showToast('Tap screen to play'));
+                } else {
+                    videoPlayer.muted = true;
+                    videoPlayer.play().then(() => showToast('Tap screen to enable audio')).catch(e => {
+                        pendingCmd = { action: 'PLAY' };
+                        showToast('Tap screen to play');
+                    });
+                }
+            }
+        }
+
+        function doPause() {
+            if (mode === 'video') videoPlayer.pause();
+        }
+
+        function doStop() {
+            cleanup();
+            currentMediaUrl = '';
+            currentMediaTitle = '';
+            mode = 'none';
+            videoPlayer.classList.add('hidden');
+            mediaContainer.classList.add('hidden');
+            idleScreen.classList.remove('hidden');
+        }
+
+        function doSeek(sec) {
+            if (mode === 'video') {
+                videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime + sec);
+            }
+        }
+
+        function doSeekTo(val) {
+            if (mode === 'video' && videoPlayer.duration) {
+                videoPlayer.currentTime = val;
+            }
+        }
+
+        function doVolume(delta) {
+            currentVolume = Math.max(0, Math.min(100, currentVolume + delta));
+            isMuted = false;
+            if (mode === 'video') {
+                videoPlayer.volume = currentVolume / 100;
+                videoPlayer.muted = false;
+            }
+            showVolumeOverlay();
+        }
+
+        function doMute(mute) {
+            isMuted = mute;
+            if (mode === 'video') videoPlayer.muted = mute;
+            showToast(mute ? 'Muted' : 'Unmuted');
+        }
+
+        // Status report every 1s
+        function reportStatus() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            let playing = false, duration = 0, position = 0;
+            if (mode === 'video' && videoPlayer.src) {
+                playing = !videoPlayer.paused;
+                duration = videoPlayer.duration || 0;
+                position = videoPlayer.currentTime || 0;
+            }
+            ws.send(JSON.stringify({
+                type: 'status',
+                playing, title: currentMediaTitle, url: currentMediaUrl,
+                volume: currentVolume, muted: isMuted,
+                duration, position,
+            }));
+        }
+        setInterval(reportStatus, 1000);
+
+        function showToast(text) {
+            toast.textContent = text;
+            toast.classList.add('show');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function showVolumeOverlay() {
+            const o = document.getElementById('volume-overlay');
+            document.getElementById('volume-fill').style.height = currentVolume + '%';
+            document.getElementById('volume-label').textContent = currentVolume + '%';
+            o.classList.add('show');
+            clearTimeout(volumeTimeout);
+            volumeTimeout = setTimeout(() => o.classList.remove('show'), 2000);
+        }
+
+        // Hide cursor after inactivity
+        let cursorTimeout;
+        document.addEventListener('mousemove', () => {
+            document.body.style.cursor = 'default';
+            clearTimeout(cursorTimeout);
+            cursorTimeout = setTimeout(() => { document.body.style.cursor = 'none'; }, 3000);
+        });
+    </script>
+</body>
+</html>
