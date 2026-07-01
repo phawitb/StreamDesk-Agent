@@ -89,6 +89,8 @@ async def monitor_url_page(token: str):
         f"const urlParams = new URLSearchParams(location.search);\n"
         f"        urlParams.set('monitor_token', '{token}');",
     )
+    # No QR standby for URL monitor
+    html = html.replace("let showStandbyOnIdle = true;", "let showStandbyOnIdle = false;")
     return HTMLResponse(html)
 
 
