@@ -11,7 +11,7 @@ import "./App.css";
 
 function App() {
   const { user, loading: authLoading, login, logout } = useAuth();
-  const { connected, monitorInConnected, monitorOutConnected, messages, send } = useWebSocket();
+  const { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, send } = useWebSocket();
   const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">("browse");
   const [currentPoster, setCurrentPoster] = useState("");
   const [monitorMode, setMonitorMode] = useState<"inapp" | "outapp">(() => {
@@ -31,6 +31,40 @@ function App() {
   }, [monitorMode]);
 
   const monitorConnected = monitorMode === "inapp" ? monitorInConnected : monitorOutConnected;
+
+  // Load initial paired device from settings
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.paired_device_key) setPairedDevice(data.paired_device_key);
+      })
+      .catch(() => {});
+  }, [setPairedDevice]);
+
+  const handlePairDevice = useCallback(async (key: string) => {
+    try {
+      const resp = await fetch("/api/monitor/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_key: key }),
+      });
+      if (resp.ok) {
+        setPairedDevice(key);
+      }
+    } catch (e) {
+      console.error("Pair failed:", e);
+    }
+  }, [setPairedDevice]);
+
+  const handleUnpairDevice = useCallback(async () => {
+    try {
+      await fetch("/api/monitor/unpair", { method: "POST" });
+      setPairedDevice(null);
+    } catch (e) {
+      console.error("Unpair failed:", e);
+    }
+  }, [setPairedDevice]);
 
   // Detect landscape orientation
   useEffect(() => {
@@ -259,7 +293,9 @@ function App() {
               currentState={currentState}
               monitorMode={monitorMode}
               onMonitorModeChange={setMonitorMode}
-              monitorToken={user.monitor_token}
+              pairedDeviceKey={pairedDevice}
+              onPairDevice={handlePairDevice}
+              onUnpairDevice={handleUnpairDevice}
               isExternalDisconnected={isExternalDisconnected}
             />
           </div>

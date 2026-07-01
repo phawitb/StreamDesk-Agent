@@ -64,5 +64,4 @@ async def get_me(request: Request):
         "email": user["email"],
         "name": user["name"],
         "picture": user["picture"],
-        "monitor_token": user["monitor_token"],
     }

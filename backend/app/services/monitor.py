@@ -157,10 +157,13 @@ class MonitorController:
 
 
 class MonitorManager:
-    """Manages per-user MonitorControllers."""
+    """Manages per-user MonitorControllers and device connections."""
 
     def __init__(self) -> None:
         self._controllers: dict[int, MonitorController] = {}
+        self._device_connections: dict[str, WebSocket] = {}  # device_key -> ws
+        self._user_device: dict[int, str] = {}  # user_id -> device_key
+        self._device_user: dict[str, int] = {}  # device_key -> user_id (reverse)
 
     def get(self, user_id: int) -> MonitorController:
         if user_id not in self._controllers:
@@ -174,6 +177,67 @@ class MonitorManager:
     async def unregister(self, user_id: int, mode: str = "out") -> None:
         ctrl = self.get(user_id)
         await ctrl.unregister(mode)
+
+    # ── Device management ──
+
+    async def register_device(self, ws: WebSocket, device_key: str) -> None:
+        """A monitor device connected."""
+        self._device_connections[device_key] = ws
+        logger.info("Device connected: %s", device_key[:8])
+        # If a user is paired to this device, wire it in
+        user_id = self._device_user.get(device_key)
+        if user_id is not None:
+            ctrl = self.get(user_id)
+            await ctrl.register(ws, "out")
+
+    async def unregister_device(self, device_key: str) -> None:
+        """A monitor device disconnected."""
+        self._device_connections.pop(device_key, None)
+        logger.info("Device disconnected: %s", device_key[:8])
+        # If a user is paired, clear the out slot
+        user_id = self._device_user.get(device_key)
+        if user_id is not None:
+            ctrl = self.get(user_id)
+            await ctrl.unregister("out")
+
+    async def pair_user(self, user_id: int, device_key: str) -> None:
+        """Pair a user to a device. Last-wins if device already paired."""
+        # Unpair this user from any previous device
+        await self.unpair_user(user_id)
+        # Unpair any other user from this device
+        old_user = self._device_user.get(device_key)
+        if old_user is not None and old_user != user_id:
+            self._user_device.pop(old_user, None)
+            old_ctrl = self.get(old_user)
+            await old_ctrl.unregister("out")
+            logger.info("Unpaired user %d from device %s (taken by user %d)", old_user, device_key[:8], user_id)
+        # Set pairing
+        self._user_device[user_id] = device_key
+        self._device_user[device_key] = user_id
+        logger.info("Paired user %d to device %s", user_id, device_key[:8])
+        # Wire device ws if connected
+        ws = self._device_connections.get(device_key)
+        if ws:
+            ctrl = self.get(user_id)
+            await ctrl.register(ws, "out")
+
+    async def unpair_user(self, user_id: int) -> None:
+        """Unpair a user from their device."""
+        device_key = self._user_device.pop(user_id, None)
+        if device_key:
+            self._device_user.pop(device_key, None)
+            ctrl = self.get(user_id)
+            await ctrl.unregister("out")
+            logger.info("Unpaired user %d from device %s", user_id, device_key[:8])
+
+    def get_device_key_for_user(self, user_id: int) -> Optional[str]:
+        return self._user_device.get(user_id)
+
+    def get_user_for_device(self, device_key: str) -> Optional[int]:
+        return self._device_user.get(device_key)
+
+    def is_device_connected(self, device_key: str) -> bool:
+        return device_key in self._device_connections
 
 
 monitor_manager = MonitorManager()

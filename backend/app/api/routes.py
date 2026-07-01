@@ -17,7 +17,7 @@ from app.services.agent_manager import agent_manager
 from app.services.monitor import monitor_manager
 from app.services.scraper import scrape_movies, scrape_categories, sync_all_movies
 from app.services.gemini_chat import recommend_movies
-from app.services.database import upsert_movies, get_user_by_id, get_user_by_monitor_token
+from app.services.database import upsert_movies, get_user_by_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -78,17 +78,6 @@ async def monitor_in_page():
     return HTMLResponse(html)
 
 
-@router.get("/monitor/{token}", response_class=HTMLResponse)
-async def monitor_token_page(token: str):
-    user = await get_user_by_monitor_token(token)
-    if not user:
-        return HTMLResponse("<h1>Invalid monitor link</h1>", status_code=404)
-    html_path = TEMPLATES_DIR / "monitor.html"
-    html = html_path.read_text(encoding="utf-8")
-    html = html.replace("/ws/monitor", f"/ws/monitor/{token}")
-    return HTMLResponse(html)
-
-
 @router.websocket("/ws/monitorin")
 async def ws_monitor_in(ws: WebSocket):
     # Get user_id from session cookie
@@ -122,18 +111,17 @@ async def ws_monitor_in(ws: WebSocket):
         await broadcast({"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected}, user_id)
 
 
-@router.websocket("/ws/monitor/{token}")
-async def ws_monitor_token(ws: WebSocket, token: str):
-    user = await get_user_by_monitor_token(token)
-    if not user:
-        await ws.close(code=4001)
-        return
-
-    user_id = user["id"]
+@router.websocket("/ws/monitor-device/{device_key}")
+async def ws_monitor_device(ws: WebSocket, device_key: str):
+    """Monitor device (e.g. Raspberry Pi) connects here."""
     await ws.accept()
-    await monitor_manager.register(ws, user_id, "out")
-    ctrl = monitor_manager.get(user_id)
-    await broadcast({"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected}, user_id)
+    await monitor_manager.register_device(ws, device_key)
+
+    # Broadcast status if a user is paired
+    user_id = monitor_manager.get_user_for_device(device_key)
+    if user_id is not None:
+        ctrl = monitor_manager.get(user_id)
+        await broadcast({"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected}, user_id)
 
     try:
         while True:
@@ -141,15 +129,58 @@ async def ws_monitor_token(ws: WebSocket, token: str):
             try:
                 data = json.loads(raw)
                 if data.get("type") == "status":
-                    ctrl.update_status(data)
+                    uid = monitor_manager.get_user_for_device(device_key)
+                    if uid is not None:
+                        ctrl = monitor_manager.get(uid)
+                        ctrl.update_status(data)
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:
         pass
     finally:
-        await monitor_manager.unregister(user_id, "out")
-        ctrl = monitor_manager.get(user_id)
-        await broadcast({"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected}, user_id)
+        # Broadcast disconnect before unregistering
+        user_id = monitor_manager.get_user_for_device(device_key)
+        await monitor_manager.unregister_device(device_key)
+        if user_id is not None:
+            ctrl = monitor_manager.get(user_id)
+            await broadcast({"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected}, user_id)
+
+
+# ── Monitor pairing ──
+
+@router.post("/api/monitor/pair")
+async def pair_monitor(request: Request, body: dict):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    device_key = body.get("device_key", "").strip()
+    if not device_key:
+        return JSONResponse({"error": "Missing device_key"}, status_code=400)
+    await monitor_manager.pair_user(user_id, device_key)
+    ctrl = monitor_manager.get(user_id)
+    await broadcast({
+        "type": "monitor_status",
+        "in_connected": ctrl.in_connected,
+        "out_connected": ctrl.out_connected,
+        "paired_device": device_key,
+    }, user_id)
+    return {"ok": True, "device_key": device_key, "connected": ctrl.out_connected}
+
+
+@router.post("/api/monitor/unpair")
+async def unpair_monitor(request: Request):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    await monitor_manager.unpair_user(user_id)
+    ctrl = monitor_manager.get(user_id)
+    await broadcast({
+        "type": "monitor_status",
+        "in_connected": ctrl.in_connected,
+        "out_connected": ctrl.out_connected,
+        "paired_device": None,
+    }, user_id)
+    return {"ok": True}
 
 
 # ── Settings ──
@@ -157,9 +188,9 @@ async def ws_monitor_token(ws: WebSocket, token: str):
 @router.get("/api/settings")
 async def get_settings(request: Request):
     user_id = _get_user_id(request)
-    user = await get_user_by_id(user_id) if user_id else None
+    paired_key = monitor_manager.get_device_key_for_user(user_id) if user_id else None
     return {
-        "monitor_token": user["monitor_token"] if user else None,
+        "paired_device_key": paired_key,
     }
 
 
@@ -297,8 +328,9 @@ async def websocket_endpoint(ws: WebSocket):
         StatusMessage(state=AgentState.IDLE, message="พร้อมรับคำสั่ง").model_dump(),
         ensure_ascii=False,
     ))
+    paired_key = monitor_manager.get_device_key_for_user(user_id)
     await ws.send_text(json.dumps(
-        {"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected},
+        {"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected, "paired_device": paired_key},
         ensure_ascii=False,
     ))
 

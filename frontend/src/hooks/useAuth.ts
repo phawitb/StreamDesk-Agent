@@ -5,7 +5,6 @@ export interface User {
   email: string;
   name: string;
   picture: string;
-  monitor_token: string;
 }
 
 export function useAuth() {

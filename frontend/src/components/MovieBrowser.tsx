@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { QRScanner } from "./QRScanner";
 import type { Movie, MoviesResponse } from "../types/movie";
 import type { AgentState } from "../types/messages";
 
@@ -20,7 +21,9 @@ interface Props {
   currentState?: AgentState;
   monitorMode?: "inapp" | "outapp";
   onMonitorModeChange?: (mode: "inapp" | "outapp") => void;
-  monitorToken?: string;
+  pairedDeviceKey?: string | null;
+  onPairDevice?: (key: string) => void;
+  onUnpairDevice?: () => void;
   isExternalDisconnected?: boolean;
 }
 
@@ -60,7 +63,7 @@ function formatTimeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
-export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMode = "outapp", onMonitorModeChange, monitorToken, isExternalDisconnected }: Props) {
+export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMode = "outapp", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, isExternalDisconnected }: Props) {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [recentMovies, setRecentMovies] = useState<Movie[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>(getHistory);
@@ -71,7 +74,9 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
   const [activeCategory, setActiveCategory] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [deviceKeyInput, setDeviceKeyInput] = useState("");
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [pairing, setPairing] = useState(false);
   const recentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -134,15 +139,22 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
     setTimeout(() => setSyncing(false), 3000);
   };
 
-  const monitorUrl = monitorToken ? `${window.location.origin}/monitor/${monitorToken}` : "";
-
-  const handleCopyUrl = () => {
-    if (monitorUrl) {
-      navigator.clipboard.writeText(monitorUrl).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      });
+  const handlePair = async () => {
+    const key = deviceKeyInput.trim();
+    if (!key) return;
+    setPairing(true);
+    try {
+      onPairDevice?.(key);
+      setDeviceKeyInput("");
+    } finally {
+      setPairing(false);
     }
+  };
+
+  const handleQRScan = (scannedKey: string) => {
+    setShowQRScanner(false);
+    setDeviceKeyInput(scannedKey);
+    onPairDevice?.(scannedKey);
   };
 
   // Connection status helpers
@@ -243,37 +255,89 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
                       </button>
                     </div>
                     <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
-                      {monitorMode === "inapp" ? "ดูในแอป — แท็บ Monitor" : "ดูภายนอก — เปิด URL ด้านล่างบนจอ Monitor"}
+                      {monitorMode === "inapp" ? "ดูในแอป — แท็บ Monitor" : "ดูภายนอก — เชื่อมต่อจอ Monitor ด้วย Device Key"}
                     </div>
-                    {monitorMode === "outapp" && monitorUrl && (
+                    {monitorMode === "outapp" && (
                       <div style={{ marginTop: 8 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
-                          Monitor URL
-                        </div>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <input
-                            readOnly
-                            value={monitorUrl}
-                            style={{
-                              flex: 1, padding: "6px 8px", borderRadius: 4,
-                              border: "1px solid var(--border)", background: "var(--bg-base)",
-                              color: "var(--text-primary)", fontSize: 11, outline: "none",
-                              minWidth: 0,
-                            }}
-                            onClick={(e) => (e.target as HTMLInputElement).select()}
-                          />
-                          <button
-                            onClick={handleCopyUrl}
-                            style={{
-                              padding: "6px 10px", borderRadius: 4, border: "none",
-                              background: copied ? "#46D369" : "var(--accent)",
-                              color: "#fff", fontSize: 11, fontWeight: 600,
-                              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-                            }}
-                          >
-                            {copied ? "Copied!" : "Copy"}
-                          </button>
-                        </div>
+                        {pairedDeviceKey ? (
+                          /* Already paired */
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                              Paired Device
+                            </div>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <div style={{
+                                flex: 1, padding: "6px 8px", borderRadius: 4,
+                                border: "1px solid var(--border)", background: "var(--bg-base)",
+                                color: "var(--text-primary)", fontSize: 11,
+                                fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis",
+                              }}>
+                                {pairedDeviceKey}
+                              </div>
+                              <button
+                                onClick={() => onUnpairDevice?.()}
+                                style={{
+                                  padding: "6px 10px", borderRadius: 4, border: "none",
+                                  background: "var(--accent)", color: "#fff",
+                                  fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                  whiteSpace: "nowrap", flexShrink: 0,
+                                }}
+                              >
+                                Disconnect
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Not paired — input + scan */
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                              Device Key
+                            </div>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <input
+                                value={deviceKeyInput}
+                                onChange={(e) => setDeviceKeyInput(e.target.value)}
+                                placeholder="Enter device key..."
+                                style={{
+                                  flex: 1, padding: "6px 8px", borderRadius: 4,
+                                  border: "1px solid var(--border)", background: "var(--bg-base)",
+                                  color: "var(--text-primary)", fontSize: 11, outline: "none",
+                                  minWidth: 0,
+                                }}
+                                onKeyDown={(e) => e.key === "Enter" && handlePair()}
+                              />
+                              <button
+                                onClick={handlePair}
+                                disabled={!deviceKeyInput.trim() || pairing}
+                                style={{
+                                  padding: "6px 10px", borderRadius: 4, border: "none",
+                                  background: deviceKeyInput.trim() ? "var(--accent)" : "rgba(255,255,255,0.08)",
+                                  color: "#fff", fontSize: 11, fontWeight: 600,
+                                  cursor: deviceKeyInput.trim() ? "pointer" : "default",
+                                  whiteSpace: "nowrap", flexShrink: 0,
+                                }}
+                              >
+                                Connect
+                              </button>
+                            </div>
+                            <button
+                              onClick={() => setShowQRScanner(true)}
+                              style={{
+                                width: "100%", marginTop: 6, padding: "7px 0",
+                                borderRadius: 4, border: "1px solid var(--border)",
+                                background: "transparent", color: "var(--text-secondary)",
+                                fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                              }}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+                                <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+                                <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+                              </svg>
+                              Scan QR Code
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -574,6 +638,11 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
           </div>
         )}
       </div>
+
+      {/* QR Scanner modal */}
+      {showQRScanner && (
+        <QRScanner onScan={handleQRScan} onClose={() => setShowQRScanner(false)} />
+      )}
 
       {/* Grid + scrollbar styling */}
       <style>{`

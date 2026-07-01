@@ -9,6 +9,7 @@ export function useWebSocket() {
   const [connected, setConnected] = useState(false);
   const [monitorInConnected, setMonitorInConnected] = useState(false);
   const [monitorOutConnected, setMonitorOutConnected] = useState(false);
+  const [pairedDevice, setPairedDevice] = useState<string | null>(null);
   const [messages, setMessages] = useState<ServerMessage[]>([]);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -33,6 +34,9 @@ export function useWebSocket() {
         if (data.type === "monitor_status") {
           setMonitorInConnected(!!data.in_connected);
           setMonitorOutConnected(!!data.out_connected);
+          if (data.paired_device !== undefined) {
+            setPairedDevice(data.paired_device || null);
+          }
           return;
         }
         const msg: ServerMessage = data;
@@ -70,5 +74,5 @@ export function useWebSocket() {
     }
   }, []);
 
-  return { connected, monitorInConnected, monitorOutConnected, messages, send };
+  return { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, send };
 }
