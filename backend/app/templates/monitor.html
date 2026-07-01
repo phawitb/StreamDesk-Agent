@@ -303,13 +303,16 @@
                 monitorActive = true;
                 hideStandby();
             } else {
-                // This monitor is now inactive — show standby
-                // Backend already sent PAUSE before this
+                // This monitor is now inactive
                 monitorActive = false;
                 cleanup();
                 mediaMode = 'none';
                 mediaContainer.classList.add('hidden');
-                showStandby();
+                if (showStandbyOnIdle) {
+                    showStandby();
+                } else {
+                    idleScreen.classList.remove('hidden');
+                }
             }
         }
 
