@@ -389,8 +389,13 @@ function App() {
             <>
               <div className={`panel-browse ${activeTab !== "browse" ? "hidden-mobile" : ""}`}>{browsePanel}</div>
               <div className={`panel-chat ${activeTab !== "chat" ? "hidden-mobile" : ""}`}>{chatPanel}</div>
-              {monitorPanel && activeTab === "monitor" && (
-                <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+              {monitorPanel && (
+                <div style={{
+                  flex: activeTab === "monitor" ? 1 : 0,
+                  height: activeTab === "monitor" ? undefined : 0,
+                  overflow: "hidden",
+                  display: "flex", flexDirection: "column",
+                }}>
                   {monitorPanel}
                 </div>
               )}
