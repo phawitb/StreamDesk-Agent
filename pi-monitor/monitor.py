@@ -65,10 +65,10 @@ def main():
         page = context.new_page()
 
         log.info("Opening monitor page...")
-        page.goto(monitor_url, wait_until="domcontentloaded")
+        page.goto(monitor_url, wait_until="load")
 
         # Click the "Tap to activate" overlay to unlock autoplay
-        overlay = page.locator("#activate-overlay")
+        overlay = page.locator("#activate-overlay:not(.hidden)")
         try:
             overlay.wait_for(state="visible", timeout=5000)
             overlay.click()
@@ -92,8 +92,10 @@ def main():
         while not stop:
             try:
                 page.wait_for_timeout(5000)
-                # Check if WebSocket is still connected by evaluating JS
-                ws_state = page.evaluate("() => ws && ws.readyState")
+                # Check if WebSocket is still connected
+                ws_state = page.evaluate(
+                    "() => (typeof ws !== 'undefined' && ws) ? ws.readyState : -1"
+                )
                 if ws_state != 1:  # WebSocket.OPEN = 1
                     log.warning("WebSocket disconnected (state=%s), reloading...", ws_state)
                     page.reload(wait_until="domcontentloaded")
