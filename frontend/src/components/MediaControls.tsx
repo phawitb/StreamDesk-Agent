@@ -31,9 +31,11 @@ const WAITING_STATES = new Set<string>(["launching", "navigating", "loading_play
 
 export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle" }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: false, volume: 50, muted: false });
+  const [displayTime, setDisplayTime] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [dragTime, setDragTime] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const tickRef = useRef<ReturnType<typeof setInterval>>();
   const titleRef = useRef<HTMLDivElement>(null);
   const [needsMarquee, setNeedsMarquee] = useState(false);
 
@@ -52,12 +54,29 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
     const handler = (e: CustomEvent) => {
       const data = e.detail;
       if (data.type === "media_status") {
-        setStatus({ currentTime: data.currentTime || 0, duration: data.duration || 0, paused: data.paused ?? false, volume: data.volume ?? 50, muted: data.muted ?? false });
+        const ct = data.currentTime || 0;
+        const dur = data.duration || 0;
+        // Ignore stale 0/0 updates if we already have valid data
+        if (ct === 0 && dur === 0 && status.duration > 0) return;
+        setStatus({ currentTime: ct, duration: dur, paused: data.paused ?? false, volume: data.volume ?? 50, muted: data.muted ?? false });
+        setDisplayTime(ct);
       }
     };
     window.addEventListener("media_status" as any, handler as any);
     return () => window.removeEventListener("media_status" as any, handler as any);
-  }, []);
+  }, [status.duration]);
+
+  // Interpolate time every second between polls for smooth display
+  useEffect(() => {
+    if (!active || status.paused || status.duration <= 0) {
+      clearInterval(tickRef.current);
+      return;
+    }
+    tickRef.current = setInterval(() => {
+      setDisplayTime((t) => Math.min(t + 1, status.duration));
+    }, 1000);
+    return () => clearInterval(tickRef.current);
+  }, [active, status.paused, status.duration]);
 
   useEffect(() => {
     const el = titleRef.current;
@@ -79,7 +98,8 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
     setDragging(false);
   }, [onMediaControl, dragTime]);
 
-  const progress = status.duration > 0 ? ((dragging ? dragTime : status.currentTime) / status.duration) * 100 : 0;
+  const currentPos = dragging ? dragTime : displayTime;
+  const progress = status.duration > 0 ? (currentPos / status.duration) * 100 : 0;
 
   // Display text logic
   let displayText: React.ReactNode;
@@ -117,7 +137,7 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
           min={0}
           max={status.duration || 100}
           step={1}
-          value={dragging ? dragTime : status.currentTime}
+          value={currentPos}
           onChange={handleSliderChange}
           onMouseUp={handleSliderCommit}
           onTouchEnd={handleSliderCommit}
@@ -161,7 +181,7 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
           </div>
           {active && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums", marginTop: 1 }}>
-              {formatTime(dragging ? dragTime : status.currentTime)} / {formatTime(status.duration)}
+              {formatTime(currentPos)} / {formatTime(status.duration)}
             </div>
           )}
         </div>
