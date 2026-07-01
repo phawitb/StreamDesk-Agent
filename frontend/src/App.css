@@ -12,11 +12,6 @@
   min-height: 0;
 }
 
-/* ── Sidebar — always hidden (mobile-style layout) ── */
-.sidebar {
-  display: none;
-}
-
 /* ── Main Content ── */
 .main-content {
   flex: 1;
@@ -27,6 +22,7 @@
   overflow: hidden;
 }
 
+/* ── Panels (mobile default: tab-switched) ── */
 .panel-browse,
 .panel-chat,
 .panel-monitor {
@@ -60,7 +56,7 @@
   border-top: 1px solid var(--border);
 }
 
-/* ── Bottom Nav ── */
+/* ── Bottom Nav (mobile) ── */
 .bottom-nav {
   display: flex;
   flex-shrink: 0;
@@ -113,13 +109,77 @@
   border-color: var(--accent);
 }
 
-/* ── Desktop: constrain width for comfortable reading ── */
+/* ══════════════════════════════════════
+   Desktop: two-column layout
+   Left = Browse (3/4), Right = Monitor + Chat (1/4)
+   ══════════════════════════════════════ */
 @media (min-width: 769px) {
-  .app {
-    max-width: 480px;
-    margin: 0 auto;
+  /* Hide mobile bottom nav */
+  .bottom-nav {
+    display: none;
+  }
+
+  /* No tab hiding on desktop — all panels always visible */
+  .panel-browse.hidden-mobile,
+  .panel-chat.hidden-mobile,
+  .panel-monitor.hidden-mobile {
+    display: flex;
+  }
+
+  .main-content {
+    flex-direction: row;
+  }
+
+  /* Left column: Browse */
+  .panel-browse {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+  }
+
+  /* Right column wrapper (set inline via JS) */
+  .desktop-right {
+    display: flex;
+    flex-direction: column;
+    min-width: 280px;
+    max-width: 50vw;
+    flex-shrink: 0;
     border-left: 1px solid var(--border);
-    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  /* Monitor mini player */
+  .desktop-right .panel-monitor {
+    flex: none;
+    height: 200px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Chat fills remaining space */
+  .desktop-right .panel-chat {
+    flex: 1;
+    min-height: 0;
+    border-left: none;
+  }
+
+  /* Resizable divider */
+  .column-divider {
+    width: 5px;
+    cursor: col-resize;
+    background: transparent;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+    transition: background 0.15s;
+  }
+
+  .column-divider:hover,
+  .column-divider.dragging {
+    background: var(--accent);
+  }
+
+  .now-playing-bar {
+    height: 68px;
   }
 }
 

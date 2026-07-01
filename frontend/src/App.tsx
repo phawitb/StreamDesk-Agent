@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./hooks/useAuth";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { ChatWindow } from "./components/ChatWindow";
@@ -71,6 +71,68 @@ function App() {
   }, [setPairedDevice]);
 
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth > 768);
+  const [rightWidth, setRightWidth] = useState(() => {
+    const stored = localStorage.getItem("desktopRightWidth");
+    return stored ? parseInt(stored) : Math.round(window.innerWidth * 0.25);
+  });
+  const dividerRef = useRef<HTMLDivElement>(null);
+
+  // Detect desktop vs mobile
+  useEffect(() => {
+    const check = () => setIsDesktop(window.innerWidth > 768);
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  // Draggable column divider
+  useEffect(() => {
+    if (!isDesktop) return;
+    const divider = dividerRef.current;
+    if (!divider) return;
+
+    let startX = 0;
+    let startWidth = 0;
+
+    const onMove = (clientX: number) => {
+      const delta = startX - clientX;
+      const newWidth = Math.max(280, Math.min(window.innerWidth * 0.5, startWidth + delta));
+      setRightWidth(newWidth);
+    };
+
+    const onMouseMove = (e: MouseEvent) => { e.preventDefault(); onMove(e.clientX); };
+    const onTouchMove = (e: TouchEvent) => { onMove(e.touches[0].clientX); };
+
+    const onEnd = () => {
+      divider.classList.remove("dragging");
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onEnd);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onEnd);
+      setRightWidth((w) => { localStorage.setItem("desktopRightWidth", String(w)); return w; });
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      startX = e.clientX; startWidth = rightWidth;
+      divider.classList.add("dragging");
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onEnd);
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      startX = e.touches[0].clientX; startWidth = rightWidth;
+      divider.classList.add("dragging");
+      document.addEventListener("touchmove", onTouchMove);
+      document.addEventListener("touchend", onEnd);
+    };
+
+    divider.addEventListener("mousedown", onMouseDown);
+    divider.addEventListener("touchstart", onTouchStart);
+    return () => {
+      divider.removeEventListener("mousedown", onMouseDown);
+      divider.removeEventListener("touchstart", onTouchStart);
+    };
+  }, [isDesktop, rightWidth]);
 
   // Detect landscape orientation
   useEffect(() => {
@@ -259,52 +321,80 @@ function App() {
     return <LoginScreen onLogin={login} />;
   }
 
+  const browsePanel = (
+    <MovieBrowser
+      onSelectMovie={handleSelectMovie}
+      connected={monitorConnected}
+      currentState={currentState}
+      monitorMode={monitorMode}
+      onMonitorModeChange={setMonitorMode}
+      pairedDeviceKey={pairedDevice}
+      onPairDevice={handlePairDevice}
+      onUnpairDevice={handleUnpairDevice}
+      monitorToken={monitorToken}
+      isExternalDisconnected={isExternalDisconnected}
+    />
+  );
+
+  const chatPanel = (
+    <ChatWindow
+      messages={displayMessages}
+      onSend={handleSend}
+      isPlaying={isPlaying}
+      onDownload={isAdmin ? () => send({ type: "command", action: "download" }) : undefined}
+      episodes={episodes}
+      onSelectEpisode={handleSelectEpisode}
+      onSelectMovie={handleSelectMovie}
+      thinkingText={thinkingText}
+      disabled={isExternalDisconnected}
+    />
+  );
+
+  const monitorPanel = showMonitorTab ? (
+    <div
+      className="panel-monitor"
+      onClick={() => {
+        if (!isDesktop && activeTab === "monitor" && !isLandscape) {
+          setMonitorFullscreen((f) => !f);
+        }
+      }}
+    >
+      <iframe
+        src="/monitorin"
+        style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
+        allow="autoplay; fullscreen"
+      />
+    </div>
+  ) : null;
+
   return (
     <div className={`app ${monitorIsFullscreen ? "monitor-fullscreen" : ""}`}>
       <div className="app-body">
         <div className="main-content">
-          <div className={`panel-browse ${activeTab !== "browse" ? "hidden-mobile" : ""}`}>
-            <MovieBrowser
-              onSelectMovie={handleSelectMovie}
-              connected={monitorConnected}
-              currentState={currentState}
-              monitorMode={monitorMode}
-              onMonitorModeChange={setMonitorMode}
-              pairedDeviceKey={pairedDevice}
-              onPairDevice={handlePairDevice}
-              onUnpairDevice={handleUnpairDevice}
-              monitorToken={monitorToken}
-              isExternalDisconnected={isExternalDisconnected}
-            />
-          </div>
-          <div className={`panel-chat ${activeTab !== "chat" ? "hidden-mobile" : ""}`}>
-            <ChatWindow
-              messages={displayMessages}
-              onSend={handleSend}
-              isPlaying={isPlaying}
-              onDownload={isAdmin ? () => send({ type: "command", action: "download" }) : undefined}
-              episodes={episodes}
-              onSelectEpisode={handleSelectEpisode}
-              onSelectMovie={handleSelectMovie}
-              thinkingText={thinkingText}
-              disabled={isExternalDisconnected}
-            />
-          </div>
-          {showMonitorTab && (
-            <div
-              className={`panel-monitor ${activeTab !== "monitor" ? "hidden-mobile" : ""}`}
-              onClick={() => {
-                if (activeTab === "monitor" && !isLandscape) {
-                  setMonitorFullscreen((f) => !f);
-                }
-              }}
-            >
-              <iframe
-                src="/monitorin"
-                style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
-                allow="autoplay; fullscreen"
-              />
-            </div>
+          {isDesktop ? (
+            <>
+              {/* Left column: Browse */}
+              <div className="panel-browse">{browsePanel}</div>
+
+              {/* Draggable divider */}
+              <div className="column-divider" ref={dividerRef} />
+
+              {/* Right column: Monitor (small) + Chat */}
+              <div className="desktop-right" style={{ width: rightWidth }}>
+                {monitorPanel}
+                <div className="panel-chat">{chatPanel}</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={`panel-browse ${activeTab !== "browse" ? "hidden-mobile" : ""}`}>{browsePanel}</div>
+              <div className={`panel-chat ${activeTab !== "chat" ? "hidden-mobile" : ""}`}>{chatPanel}</div>
+              {monitorPanel && (
+                <div className={activeTab !== "monitor" ? "hidden-mobile" : ""} style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                  {monitorPanel}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -315,22 +405,24 @@ function App() {
         </div>
       )}
 
-      {!keyboardVisible && <nav className="bottom-nav">
-        <button className={`bottom-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
-          Browse
-        </button>
-        {showMonitorTab && (
-          <button className={`bottom-nav-item ${activeTab === "monitor" ? "active" : ""}`} onClick={() => setActiveTab("monitor")}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
-            Monitor
+      {!keyboardVisible && !isDesktop && (
+        <nav className="bottom-nav">
+          <button className={`bottom-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
+            Browse
           </button>
-        )}
-        <button className={`bottom-nav-item ${activeTab === "chat" ? "active" : ""}`} onClick={() => setActiveTab("chat")}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-          Chat
-        </button>
-      </nav>}
+          {showMonitorTab && (
+            <button className={`bottom-nav-item ${activeTab === "monitor" ? "active" : ""}`} onClick={() => setActiveTab("monitor")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+              Monitor
+            </button>
+          )}
+          <button className={`bottom-nav-item ${activeTab === "chat" ? "active" : ""}`} onClick={() => setActiveTab("chat")}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+            Chat
+          </button>
+        </nav>
+      )}
     </div>
   );
 }
