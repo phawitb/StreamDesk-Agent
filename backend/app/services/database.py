@@ -1,7 +1,8 @@
 import aiosqlite
 import logging
 import os
-import secrets
+import random
+import string
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -51,14 +52,37 @@ async def init_db():
         await db.close()
 
 
+def _generate_short_token(length: int = 5) -> str:
+    """Generate a short alphanumeric token (e.g. 'vd7Sc')."""
+    chars = string.ascii_letters + string.digits
+    return "".join(random.choice(chars) for _ in range(length))
+
+
 async def get_or_create_user(email: str, name: str = "", picture: str = "") -> dict:
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM users WHERE email = ?", (email,))
         row = await cursor.fetchone()
         if row:
-            return dict(row)
-        token = secrets.token_urlsafe(16)
+            user = dict(row)
+            # Migrate long tokens to short 5-char tokens
+            if len(user.get("monitor_token", "")) > 5:
+                new_token = _generate_short_token()
+                await db.execute(
+                    "UPDATE users SET monitor_token = ? WHERE id = ?",
+                    (new_token, user["id"]),
+                )
+                await db.commit()
+                user["monitor_token"] = new_token
+            return user
+        # Generate unique 5-char token
+        for _ in range(100):
+            token = _generate_short_token()
+            existing = await db.execute(
+                "SELECT 1 FROM users WHERE monitor_token = ?", (token,)
+            )
+            if not await existing.fetchone():
+                break
         await db.execute(
             "INSERT INTO users (email, name, picture, monitor_token) VALUES (?, ?, ?, ?)",
             (email, name, picture, token),

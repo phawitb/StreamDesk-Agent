@@ -165,6 +165,7 @@
         let wasPlayingBeforeStandby = false;
         let userActivated = false; // Has user tapped to allow autoplay?
         let pendingPlay = null; // {url, platform} queued before activation
+        let showStandbyOnIdle = true; // Show QR standby when idle (false for in-app)
 
         const idleScreen = document.getElementById('idle-screen');
         const standbyScreen = document.getElementById('standby-screen');
@@ -242,15 +243,20 @@
         function connect() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
             const deviceKey = urlParams.get('device_key');
-            const wsPath = deviceKey
-                ? `/ws/monitor-device/${encodeURIComponent(deviceKey)}`
-                : '/ws/monitor';
+            const monitorToken = urlParams.get('monitor_token');
+            let wsPath;
+            if (deviceKey) {
+                wsPath = `/ws/monitor-device/${encodeURIComponent(deviceKey)}`;
+            } else if (monitorToken) {
+                wsPath = `/ws/monitor-url/${encodeURIComponent(monitorToken)}`;
+            } else {
+                wsPath = '/ws/monitor';
+            }
             ws = new WebSocket(`${protocol}//${location.host}${wsPath}`);
             ws.onopen = () => {
                 connStatus.textContent = 'Connected';
-                // Hide idle, show standby QR when no media is playing
                 idleScreen.classList.add('hidden');
-                if (mediaMode === 'none') {
+                if (mediaMode === 'none' && showStandbyOnIdle) {
                     showStandby();
                 }
             };
@@ -415,7 +421,11 @@
             mediaMode = 'none';
             videoPlayer.classList.add('hidden');
             mediaContainer.classList.add('hidden');
-            showStandby();
+            if (showStandbyOnIdle) {
+                showStandby();
+            } else {
+                idleScreen.classList.remove('hidden');
+            }
         }
 
         function doSeek(sec) {

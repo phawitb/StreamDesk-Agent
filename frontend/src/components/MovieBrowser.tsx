@@ -19,11 +19,12 @@ interface Props {
   onSelectMovie: (url: string, poster?: string) => void;
   connected?: boolean;
   currentState?: AgentState;
-  monitorMode?: "inapp" | "outapp";
-  onMonitorModeChange?: (mode: "inapp" | "outapp") => void;
+  monitorMode?: "inapp" | "device" | "url";
+  onMonitorModeChange?: (mode: "inapp" | "device" | "url") => void;
   pairedDeviceKey?: string | null;
   onPairDevice?: (key: string) => void;
   onUnpairDevice?: () => void;
+  monitorToken?: string | null;
   isExternalDisconnected?: boolean;
 }
 
@@ -63,7 +64,7 @@ function formatTimeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
-export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMode = "outapp", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, isExternalDisconnected }: Props) {
+export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected }: Props) {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [recentMovies, setRecentMovies] = useState<Movie[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>(getHistory);
@@ -77,6 +78,7 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
   const [deviceKeyInput, setDeviceKeyInput] = useState("");
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [pairing, setPairing] = useState(false);
+  const [copied, setCopied] = useState(false);
   const recentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -230,37 +232,36 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
                     <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
                       Monitor Mode
                     </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        onClick={() => onMonitorModeChange?.("inapp")}
-                        style={{
-                          flex: 1, padding: "7px 0", borderRadius: 6, border: "none",
-                          background: monitorMode === "inapp" ? "var(--accent)" : "rgba(255,255,255,0.08)",
-                          color: monitorMode === "inapp" ? "#fff" : "var(--text-secondary)",
-                          fontSize: 12, fontWeight: 600, cursor: "pointer",
-                        }}
-                      >
-                        In-App
-                      </button>
-                      <button
-                        onClick={() => onMonitorModeChange?.("outapp")}
-                        style={{
-                          flex: 1, padding: "7px 0", borderRadius: 6, border: "none",
-                          background: monitorMode === "outapp" ? "var(--accent)" : "rgba(255,255,255,0.08)",
-                          color: monitorMode === "outapp" ? "#fff" : "var(--text-secondary)",
-                          fontSize: 12, fontWeight: 600, cursor: "pointer",
-                        }}
-                      >
-                        External
-                      </button>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {(["inapp", "device", "url"] as const).map((mode) => {
+                        const labels = { inapp: "In-App", device: "\u03BB-Device", url: "URL" };
+                        const active = monitorMode === mode;
+                        return (
+                          <button
+                            key={mode}
+                            onClick={() => onMonitorModeChange?.(mode)}
+                            style={{
+                              flex: 1, padding: "7px 0", borderRadius: 6, border: "none",
+                              background: active ? "var(--accent)" : "rgba(255,255,255,0.08)",
+                              color: active ? "#fff" : "var(--text-secondary)",
+                              fontSize: 11, fontWeight: 600, cursor: "pointer",
+                            }}
+                          >
+                            {labels[mode]}
+                          </button>
+                        );
+                      })}
                     </div>
                     <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
-                      {monitorMode === "inapp" ? "ดูในแอป — แท็บ Monitor" : "ดูภายนอก — เชื่อมต่อจอ Monitor ด้วย Device Key"}
+                      {monitorMode === "inapp" && "ดูในแอป — แท็บ Monitor"}
+                      {monitorMode === "device" && "เชื่อมต่อจอ Monitor ด้วย Device Key"}
+                      {monitorMode === "url" && "เปิด URL บนจอใดก็ได้"}
                     </div>
-                    {monitorMode === "outapp" && (
+
+                    {/* λ-Device mode: device key + QR scan */}
+                    {monitorMode === "device" && (
                       <div style={{ marginTop: 8 }}>
                         {pairedDeviceKey ? (
-                          /* Already paired */
                           <div>
                             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
                               Paired Device
@@ -288,7 +289,6 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
                             </div>
                           </div>
                         ) : (
-                          /* Not paired — input + scan */
                           <div>
                             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
                               Device Key
@@ -338,6 +338,47 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
                             </button>
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {/* URL mode: show monitor URL */}
+                    {monitorMode === "url" && monitorToken && (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                          Monitor URL
+                        </div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input
+                            readOnly
+                            value={`${window.location.origin}/m/${monitorToken}`}
+                            style={{
+                              flex: 1, padding: "6px 8px", borderRadius: 4,
+                              border: "1px solid var(--border)", background: "var(--bg-base)",
+                              color: "var(--text-primary)", fontSize: 11, outline: "none",
+                              minWidth: 0,
+                            }}
+                            onClick={(e) => (e.target as HTMLInputElement).select()}
+                          />
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(`${window.location.origin}/m/${monitorToken}`).then(() => {
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 2000);
+                              });
+                            }}
+                            style={{
+                              padding: "6px 10px", borderRadius: 4, border: "none",
+                              background: copied ? "#46D369" : "var(--accent)",
+                              color: "#fff", fontSize: 11, fontWeight: 600,
+                              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+                            }}
+                          >
+                            {copied ? "Copied!" : "Copy"}
+                          </button>
+                        </div>
+                        <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
+                          เปิด URL นี้บนจอ Monitor ใดก็ได้
+                        </div>
                       </div>
                     )}
                   </div>

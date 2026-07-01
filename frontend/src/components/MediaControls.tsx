@@ -6,7 +6,7 @@ interface Props {
   title?: string;
   poster?: string;
   isPlaying?: boolean;
-  monitorMode?: "inapp" | "outapp";
+  monitorMode?: "inapp" | "device" | "url";
   currentState?: AgentState;
 }
 
@@ -29,7 +29,7 @@ function formatTime(seconds: number): string {
 
 const WAITING_STATES = new Set<string>(["launching", "navigating", "loading_player"]);
 
-export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "outapp", currentState = "idle" }: Props) {
+export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle" }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: false, volume: 50, muted: false });
   const [dragging, setDragging] = useState(false);
   const [dragTime, setDragTime] = useState(0);
@@ -203,7 +203,7 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
           </button>
 
           {/* Volume remote — external monitor only */}
-          {monitorMode === "outapp" && controlsActive && (
+          {monitorMode !== "inapp" && controlsActive && (
             <>
               <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
               <button

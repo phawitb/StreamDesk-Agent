@@ -14,30 +14,35 @@ function App() {
   const { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, send } = useWebSocket();
   const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">("browse");
   const [currentPoster, setCurrentPoster] = useState("");
-  const [monitorMode, setMonitorMode] = useState<"inapp" | "outapp">(() => {
-    return (localStorage.getItem("monitorMode") as "inapp" | "outapp") || "outapp";
+  const [monitorMode, setMonitorMode] = useState<"inapp" | "device" | "url">(() => {
+    const stored = localStorage.getItem("monitorMode");
+    if (stored === "inapp" || stored === "device" || stored === "url") return stored;
+    return "device"; // default (also handles old "outapp" value)
   });
   const [monitorFullscreen, setMonitorFullscreen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [monitorToken, setMonitorToken] = useState<string | null>(null);
 
   // Persist monitor mode and sync to backend
   useEffect(() => {
     localStorage.setItem("monitorMode", monitorMode);
+    const backendMode = monitorMode === "inapp" ? "inapp" : "outapp";
     fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ monitor_mode: monitorMode }),
+      body: JSON.stringify({ monitor_mode: backendMode }),
     }).catch(() => {});
   }, [monitorMode]);
 
   const monitorConnected = monitorMode === "inapp" ? monitorInConnected : monitorOutConnected;
 
-  // Load initial paired device from settings
+  // Load initial settings (paired device + monitor token)
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data) => {
         if (data.paired_device_key) setPairedDevice(data.paired_device_key);
+        if (data.monitor_token) setMonitorToken(data.monitor_token);
       })
       .catch(() => {});
   }, [setPairedDevice]);
@@ -151,7 +156,7 @@ function App() {
   }, [messages]);
 
   // Is external mode and no monitor connected?
-  const isExternalDisconnected = monitorMode === "outapp" && !monitorOutConnected;
+  const isExternalDisconnected = monitorMode !== "inapp" && !monitorOutConnected;
 
   const handleSelectEpisode = useCallback(
     (index: number) => {
@@ -296,6 +301,7 @@ function App() {
               pairedDeviceKey={pairedDevice}
               onPairDevice={handlePairDevice}
               onUnpairDevice={handleUnpairDevice}
+              monitorToken={monitorToken}
               isExternalDisconnected={isExternalDisconnected}
             />
           </div>

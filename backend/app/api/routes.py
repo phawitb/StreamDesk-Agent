@@ -17,7 +17,7 @@ from app.services.agent_manager import agent_manager
 from app.services.monitor import monitor_manager
 from app.services.scraper import scrape_movies, scrape_categories, sync_all_movies
 from app.services.gemini_chat import recommend_movies
-from app.services.database import upsert_movies, get_user_by_id
+from app.services.database import upsert_movies, get_user_by_id, get_user_by_monitor_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -69,9 +69,26 @@ async def health():
 
 @router.get("/monitor", response_class=HTMLResponse)
 async def monitor_page():
-    """Serve monitor page. Use ?device_key=xxx&autoplay=1 for Raspberry Pi."""
+    """Serve monitor page. Use ?device_key=xxx for Raspberry Pi."""
     html_path = TEMPLATES_DIR / "monitor.html"
     html = html_path.read_text(encoding="utf-8")
+    return HTMLResponse(html)
+
+
+@router.get("/m/{token}", response_class=HTMLResponse)
+async def monitor_url_page(token: str):
+    """Per-user monitor URL (e.g. /m/vd7Sc). Open on any browser as a monitor."""
+    user = await get_user_by_monitor_token(token)
+    if not user:
+        return HTMLResponse("<h1>Invalid monitor link</h1>", status_code=404)
+    html_path = TEMPLATES_DIR / "monitor.html"
+    html = html_path.read_text(encoding="utf-8")
+    # Inject the token so JS connects via /ws/monitor-url/{token}
+    html = html.replace(
+        "const urlParams = new URLSearchParams(location.search);",
+        f"const urlParams = new URLSearchParams(location.search);\n"
+        f"        urlParams.set('monitor_token', '{token}');",
+    )
     return HTMLResponse(html)
 
 
@@ -83,6 +100,8 @@ async def monitor_in_page():
     # In-app monitor: auto-activate (no tap needed, user already interacted with app)
     html = html.replace("let userActivated = false;", "let userActivated = true;")
     html = html.replace('<div id="activate-overlay">', '<div id="activate-overlay" class="hidden">')
+    # No standby screen for in-app
+    html = html.replace("let showStandbyOnIdle = true;", "let showStandbyOnIdle = false;")
     return HTMLResponse(html)
 
 
@@ -154,6 +173,37 @@ async def ws_monitor_device(ws: WebSocket, device_key: str):
             await broadcast({"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected}, user_id)
 
 
+@router.websocket("/ws/monitor-url/{token}")
+async def ws_monitor_url(ws: WebSocket, token: str):
+    """URL-based monitor — authenticated by per-user token."""
+    user = await get_user_by_monitor_token(token)
+    if not user:
+        await ws.close(code=4001)
+        return
+
+    user_id = user["id"]
+    await ws.accept()
+    await monitor_manager.register(ws, user_id, "out")
+    ctrl = monitor_manager.get(user_id)
+    await broadcast({"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected}, user_id)
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                data = json.loads(raw)
+                if data.get("type") == "status":
+                    ctrl.update_status(data)
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await monitor_manager.unregister(user_id, "out")
+        ctrl = monitor_manager.get(user_id)
+        await broadcast({"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected}, user_id)
+
+
 # ── Monitor pairing ──
 
 @router.post("/api/monitor/pair")
@@ -196,9 +246,12 @@ async def unpair_monitor(request: Request):
 @router.get("/api/settings")
 async def get_settings(request: Request):
     user_id = _get_user_id(request)
+    user = await get_user_by_id(user_id) if user_id else None
     paired_key = monitor_manager.get_device_key_for_user(user_id) if user_id else None
+    monitor_token = user["monitor_token"] if user else None
     return {
         "paired_device_key": paired_key,
+        "monitor_token": monitor_token,
     }
 
 
