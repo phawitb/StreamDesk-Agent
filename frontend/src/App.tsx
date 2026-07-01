@@ -84,13 +84,14 @@ function App() {
     return () => window.removeEventListener("resize", checkOrientation);
   }, []);
 
-  // Detect virtual keyboard (mobile)
+  // Detect virtual keyboard via visualViewport height
   useEffect(() => {
-    if (!("visualViewport" in window)) return;
-    const vv = window.visualViewport!;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const fullHeight = window.innerHeight;
     const onResize = () => {
-      const ratio = vv.height / window.innerHeight;
-      setKeyboardVisible(ratio < 0.75);
+      // keyboard is visible when viewport shrinks by >100px
+      setKeyboardVisible(fullHeight - vv.height > 100);
     };
     vv.addEventListener("resize", onResize);
     return () => vv.removeEventListener("resize", onResize);

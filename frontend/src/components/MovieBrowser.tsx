@@ -161,8 +161,9 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
 
   // Connection status helpers
   const isConnected = !!connected;
-  const statusColor = isConnected ? "#46D369" : "var(--accent)";
-  const statusLabel = isConnected ? "Monitor Connected" : "Monitor Disconnected";
+  const statusColor = isConnected ? "#46D369" : "#E50914";
+  const modeLabels = { inapp: "In-App", device: "λ-Device", url: "URL" };
+  const statusLabel = modeLabels[monitorMode] || "Monitor";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
