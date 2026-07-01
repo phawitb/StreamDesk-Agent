@@ -1,12 +1,11 @@
 # StreamDesk Monitor — systemd service for Raspberry Pi
 #
 # Setup:
-#   1. Edit this file: set SERVER_URL and DEVICE_KEY
-#   2. Copy to systemd:
-#        sudo cp streamdesk-monitor.service /etc/systemd/system/
-#   3. Enable and start:
-#        sudo systemctl enable streamdesk-monitor
-#        sudo systemctl start streamdesk-monitor
+#   1. Install: pip install playwright && playwright install chromium
+#   2. Edit ExecStart below: set SERVER_URL and DEVICE_KEY
+#   3. Copy: sudo cp streamdesk-monitor.service /etc/systemd/system/
+#   4. Enable: sudo systemctl enable streamdesk-monitor
+#   5. Start:  sudo systemctl start streamdesk-monitor
 #
 # Logs:
 #   journalctl -u streamdesk-monitor -f
@@ -21,7 +20,7 @@ Type=simple
 User=pi
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/pi/.Xauthority
-ExecStart=/home/pi/StreamDesk-Agent/pi-monitor/start.sh http://SERVER_IP:8000 MY_DEVICE_KEY
+ExecStart=/usr/bin/python3 /home/pi/StreamDesk-Agent/pi-monitor/monitor.py http://SERVER_IP:8000 MY_DEVICE_KEY
 Restart=on-failure
 RestartSec=10
 

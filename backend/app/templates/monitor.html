@@ -198,12 +198,7 @@
             }
         }
 
-        // Auto-activate if ?autoplay=1 (for Raspberry Pi / kiosk mode)
         const urlParams = new URLSearchParams(location.search);
-        if (urlParams.get('autoplay') === '1') {
-            activateOverlay.classList.add('hidden');
-            userActivated = true;
-        }
 
         // Generate QR code on load
         generateQR();
