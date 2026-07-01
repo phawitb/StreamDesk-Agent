@@ -1,0 +1,29 @@
+# StreamDesk Monitor — systemd service for Raspberry Pi
+#
+# Setup:
+#   1. Edit this file: set SERVER_URL and DEVICE_KEY
+#   2. Copy to systemd:
+#        sudo cp streamdesk-monitor.service /etc/systemd/system/
+#   3. Enable and start:
+#        sudo systemctl enable streamdesk-monitor
+#        sudo systemctl start streamdesk-monitor
+#
+# Logs:
+#   journalctl -u streamdesk-monitor -f
+
+[Unit]
+Description=StreamDesk Monitor
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+User=pi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+ExecStart=/home/pi/StreamDesk-Agent/pi-monitor/start.sh http://SERVER_IP:8000 MY_DEVICE_KEY
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

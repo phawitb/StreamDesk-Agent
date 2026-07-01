@@ -67,6 +67,14 @@ async def health():
 
 # ── Monitor pages ──
 
+@router.get("/monitor", response_class=HTMLResponse)
+async def monitor_page():
+    """Serve monitor page. Use ?device_key=xxx&autoplay=1 for Raspberry Pi."""
+    html_path = TEMPLATES_DIR / "monitor.html"
+    html = html_path.read_text(encoding="utf-8")
+    return HTMLResponse(html)
+
+
 @router.get("/monitorin", response_class=HTMLResponse)
 async def monitor_in_page():
     html_path = TEMPLATES_DIR / "monitor.html"
@@ -323,11 +331,34 @@ async def websocket_endpoint(ws: WebSocket):
 
     agent_manager.set_episode_callback(episode_callback)
 
-    # Send initial status
-    await ws.send_text(json.dumps(
-        StatusMessage(state=AgentState.IDLE, message="พร้อมรับคำสั่ง").model_dump(),
-        ensure_ascii=False,
-    ))
+    # Send initial status — restore current playback state if active
+    status = ctrl.status
+    if status.get("playing") and status.get("title"):
+        await ws.send_text(json.dumps(
+            StatusMessage(
+                state=AgentState.PLAYING,
+                message=f"กำลังเล่น: {status['title']}",
+                title=status.get("title"),
+                url=status.get("url"),
+            ).model_dump(),
+            ensure_ascii=False,
+        ))
+        # Also send current media position so controls can resume
+        await ws.send_text(json.dumps(
+            {"type": "media_status", **_sanitize_floats({
+                "currentTime": status.get("position", 0),
+                "duration": status.get("duration", 0),
+                "paused": False,
+                "volume": status.get("volume", 50),
+                "muted": status.get("muted", False),
+            })},
+            ensure_ascii=False,
+        ))
+    else:
+        await ws.send_text(json.dumps(
+            StatusMessage(state=AgentState.IDLE, message="พร้อมรับคำสั่ง").model_dump(),
+            ensure_ascii=False,
+        ))
     paired_key = monitor_manager.get_device_key_for_user(user_id)
     await ws.send_text(json.dumps(
         {"type": "monitor_status", "in_connected": ctrl.in_connected, "out_connected": ctrl.out_connected, "paired_device": paired_key},

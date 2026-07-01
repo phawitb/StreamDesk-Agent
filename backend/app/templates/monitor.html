@@ -177,6 +177,11 @@
 
         // Tap to activate — unlocks autoplay
         activateOverlay.addEventListener('click', () => {
+            activateMonitor();
+        });
+
+        function activateMonitor() {
+            if (userActivated) return;
             userActivated = true;
             activateOverlay.classList.add('hidden');
             // Play a silent buffer to unlock audio context
@@ -191,19 +196,26 @@
                 openMedia(pendingPlay.url, pendingPlay.platform);
                 pendingPlay = null;
             }
-        });
+        }
+
+        // Auto-activate if ?autoplay=1 (for Raspberry Pi / kiosk mode)
+        const urlParams = new URLSearchParams(location.search);
+        if (urlParams.get('autoplay') === '1') {
+            activateOverlay.classList.add('hidden');
+            userActivated = true;
+        }
 
         // Generate QR code on load
         generateQR();
         connect();
 
         function generateQR() {
-            // Build the frontend URL from the server's hostname
-            const host = location.hostname;
-            const frontendUrl = 'http://' + host + ':3000';
+            const deviceKey = urlParams.get('device_key');
+            // If device_key present, QR = device_key for pairing; otherwise QR = frontend URL
+            const qrData = deviceKey || ('http://' + location.hostname + ':3000');
 
             const qr = qrcode(0, 'M');
-            qr.addData(frontendUrl);
+            qr.addData(qrData);
             qr.make();
 
             const container = document.getElementById('qr-container');
@@ -227,12 +239,18 @@
             container.innerHTML = '';
             container.appendChild(canvas);
 
-            document.getElementById('standby-url').textContent = frontendUrl;
+            document.getElementById('standby-url').textContent = deviceKey
+                ? 'Device: ' + deviceKey
+                : qrData;
         }
 
         function connect() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${location.host}/ws/monitor`);
+            const deviceKey = urlParams.get('device_key');
+            const wsPath = deviceKey
+                ? `/ws/monitor-device/${encodeURIComponent(deviceKey)}`
+                : '/ws/monitor';
+            ws = new WebSocket(`${protocol}//${location.host}${wsPath}`);
             ws.onopen = () => {
                 connStatus.textContent = 'Connected';
                 // Hide idle, decide standby vs media
