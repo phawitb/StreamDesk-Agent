@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "./hooks/useAuth";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { ChatWindow } from "./components/ChatWindow";
-import { StatusBar } from "./components/StatusBar";
 import { MovieBrowser } from "./components/MovieBrowser";
 import { MediaControls } from "./components/MediaControls";
 import { LoginScreen } from "./components/LoginScreen";
@@ -263,49 +262,6 @@ function App() {
   return (
     <div className={`app ${monitorIsFullscreen ? "monitor-fullscreen" : ""}`}>
       <div className="app-body">
-        {/* Sidebar */}
-        <aside className="sidebar">
-          <div className="sidebar-logo">
-            <svg viewBox="0 0 24 24" fill="none" style={{ width: 22, height: 22 }}>
-              <rect x="2" y="3" width="20" height="18" rx="2" fill="var(--accent)" />
-              <path d="M10 8v8l6-4-6-4z" fill="#fff" />
-            </svg>
-            StreamDesk
-          </div>
-          <nav className="sidebar-nav">
-            <button className={`sidebar-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
-              Browse
-            </button>
-            <button className={`sidebar-nav-item ${activeTab === "chat" ? "active" : ""}`} onClick={() => setActiveTab("chat")}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-              Chat
-            </button>
-            {showMonitorTab && (
-              <button className={`sidebar-nav-item ${activeTab === "monitor" ? "active" : ""}`} onClick={() => setActiveTab("monitor")}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
-                Monitor
-                {!monitorConnected && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", marginLeft: "auto" }} />}
-              </button>
-            )}
-          </nav>
-          <div className="sidebar-footer">
-            {user.picture && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px" }}>
-                <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: "50%" }} referrerPolicy="no-referrer" />
-                <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {user.name || user.email}
-                </span>
-              </div>
-            )}
-            <StatusBar state={currentState} connected={connected} />
-            <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn-reset" onClick={() => send({ type: "command", action: "reset" })} style={{ flex: 1 }}>Reset</button>
-              <button className="btn-reset" onClick={logout}>Logout</button>
-            </div>
-          </div>
-        </aside>
-
         <div className="main-content">
           <div className={`panel-browse ${activeTab !== "browse" ? "hidden-mobile" : ""}`}>
             <MovieBrowser
