@@ -1,6 +1,7 @@
 import aiosqlite
 import logging
 import os
+import secrets
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -34,8 +35,58 @@ async def init_db():
                 cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                name TEXT,
+                picture TEXT,
+                monitor_token TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.commit()
         logger.info("Database initialized at %s", DB_PATH)
+    finally:
+        await db.close()
+
+
+async def get_or_create_user(email: str, name: str = "", picture: str = "") -> dict:
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM users WHERE email = ?", (email,))
+        row = await cursor.fetchone()
+        if row:
+            return dict(row)
+        token = secrets.token_urlsafe(16)
+        await db.execute(
+            "INSERT INTO users (email, name, picture, monitor_token) VALUES (?, ?, ?, ?)",
+            (email, name, picture, token),
+        )
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM users WHERE email = ?", (email,))
+        row = await cursor.fetchone()
+        return dict(row)
+    finally:
+        await db.close()
+
+
+async def get_user_by_id(user_id: int) -> Optional[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def get_user_by_monitor_token(token: str) -> Optional[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM users WHERE monitor_token = ?", (token,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
     finally:
         await db.close()
 

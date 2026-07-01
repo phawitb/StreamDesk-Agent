@@ -97,9 +97,10 @@ class HD24Agent(BaseSiteAgent):
                 pass
 
         # Mute monitor during ad skipping
-        from app.services.monitor import monitor
-        if monitor.connected:
-            await monitor.mute()
+        from app.services.monitor import monitor_manager
+        ctrl = monitor_manager.get(self._manager._user_id) if self._manager and self._manager._user_id else None
+        if ctrl and ctrl.connected:
+            await ctrl.mute()
 
         # Skip all VAST pre-roll ads
         await self._skip_all_ads_and_wait(frame)
@@ -125,8 +126,8 @@ class HD24Agent(BaseSiteAgent):
 
         if is_movie:
             # Unmute monitor now that movie is playing
-            if monitor.connected:
-                await monitor.unmute()
+            if ctrl and ctrl.connected:
+                await ctrl.unmute()
             await self._report("loading_player", f"จับ stream ได้แล้ว: {title}")
         else:
             # Self-healing: analyze why it failed

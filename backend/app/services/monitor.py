@@ -8,11 +8,11 @@ logger = logging.getLogger(__name__)
 
 
 class MonitorController:
-    """Sends playback commands to the monitor page via WebSocket."""
+    """Per-user monitor controller with in/out slots."""
 
     def __init__(self) -> None:
         self._monitors: dict[str, Optional[WebSocket]] = {"in": None, "out": None}
-        self._active_mode: str = "out"  # "in" or "out"
+        self._active_mode: str = "out"
         self._status: dict = {
             "playing": False,
             "title": "",
@@ -52,14 +52,12 @@ class MonitorController:
         volume = self._status.get("volume", 50)
         was_playing = self._status.get("playing", False)
 
-        # 1) Stop old monitor, show standby on external if going to inapp
         await self._send_to(old_mode, {"action": "PAUSE"})
         if old_mode == "out":
             await self._send_to("out", {"action": "SET_MODE", "mode": "in"})
-        elif old_mode == "in":
+        else:
             await self._send_to("out", {"action": "SET_MODE", "mode": "out"})
 
-        # 2) If there's media playing, hand it off to the new monitor
         if url:
             await self._send_to(mode, {"action": "OPEN_URL", "url": url, "title": title})
             await self._send_to(mode, {"action": "SET_VOLUME", "value": volume})
@@ -67,17 +65,6 @@ class MonitorController:
                 await self._send_to(mode, {"action": "SEEK_TO", "value": position})
             if not was_playing:
                 await self._send_to(mode, {"action": "PAUSE"})
-
-    async def _send_to(self, target: str, command: dict) -> None:
-        """Send command to a specific monitor slot."""
-        ws = self._monitors.get(target)
-        if not ws:
-            return
-        try:
-            await ws.send_text(json.dumps(command, ensure_ascii=False))
-        except Exception as e:
-            logger.error("Failed to send to monitor %s: %s", target, e)
-            self._monitors[target] = None
 
     async def register(self, ws: WebSocket, mode: str = "out") -> None:
         self._monitors[mode] = ws
@@ -97,6 +84,16 @@ class MonitorController:
         except Exception as e:
             logger.error("Failed to send to monitor: %s", e)
             self._monitors[self._active_mode] = None
+
+    async def _send_to(self, target: str, command: dict) -> None:
+        ws = self._monitors.get(target)
+        if not ws:
+            return
+        try:
+            await ws.send_text(json.dumps(command, ensure_ascii=False))
+        except Exception as e:
+            logger.error("Failed to send to monitor %s: %s", target, e)
+            self._monitors[target] = None
 
     def update_status(self, data: dict) -> None:
         self._status["playing"] = data.get("playing", False)
@@ -160,10 +157,27 @@ class MonitorController:
         vol = max(0, min(100, volume))
         await self._send({"action": "SET_VOLUME", "value": vol})
         self._status["volume"] = vol
-        if vol == 0:
-            self._status["muted"] = True
-        else:
-            self._status["muted"] = False
+        self._status["muted"] = vol == 0
 
 
-monitor = MonitorController()
+class MonitorManager:
+    """Manages per-user MonitorControllers."""
+
+    def __init__(self) -> None:
+        self._controllers: dict[int, MonitorController] = {}
+
+    def get(self, user_id: int) -> MonitorController:
+        if user_id not in self._controllers:
+            self._controllers[user_id] = MonitorController()
+        return self._controllers[user_id]
+
+    async def register(self, ws: WebSocket, user_id: int, mode: str = "out") -> None:
+        ctrl = self.get(user_id)
+        await ctrl.register(ws, mode)
+
+    async def unregister(self, user_id: int, mode: str = "out") -> None:
+        ctrl = self.get(user_id)
+        await ctrl.unregister(mode)
+
+
+monitor_manager = MonitorManager()

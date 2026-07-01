@@ -20,6 +20,8 @@ interface Props {
   currentState?: AgentState;
   monitorMode?: "inapp" | "outapp";
   onMonitorModeChange?: (mode: "inapp" | "outapp") => void;
+  monitorToken?: string;
+  isExternalDisconnected?: boolean;
 }
 
 const HISTORY_KEY = "streamdesk_history";
@@ -58,7 +60,7 @@ function formatTimeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
-export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMode = "outapp", onMonitorModeChange }: Props) {
+export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMode = "outapp", onMonitorModeChange, monitorToken, isExternalDisconnected }: Props) {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [recentMovies, setRecentMovies] = useState<Movie[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>(getHistory);
@@ -69,7 +71,7 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
   const [activeCategory, setActiveCategory] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [headless, setHeadless] = useState(false);
+  const [copied, setCopied] = useState(false);
   const recentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -121,14 +123,6 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
     [onSelectMovie]
   );
 
-  // Fetch current headless setting
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((data) => setHeadless(data.headless ?? false))
-      .catch(() => {});
-  }, []);
-
   const handleSync = async () => {
     setSyncing(true);
     setShowSettings(false);
@@ -140,17 +134,14 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
     setTimeout(() => setSyncing(false), 3000);
   };
 
-  const handleToggleHeadless = async () => {
-    const newVal = !headless;
-    try {
-      await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ headless: newVal }),
+  const monitorUrl = monitorToken ? `${window.location.origin}/monitor/${monitorToken}` : "";
+
+  const handleCopyUrl = () => {
+    if (monitorUrl) {
+      navigator.clipboard.writeText(monitorUrl).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
       });
-      setHeadless(newVal);
-    } catch (e) {
-      console.error("Failed to update headless:", e);
     }
   };
 
@@ -222,41 +213,6 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
 
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
 
-                  <button
-                    onClick={handleToggleHeadless}
-                    style={menuItemStyle(false)}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-highlight)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16, flexShrink: 0 }}>
-                      {headless ? (
-                        <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></>
-                      ) : (
-                        <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>
-                      )}
-                    </svg>
-                    <div style={{ flex: 1 }}>
-                      Headless Browser
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
-                        {headless ? "ON — ไม่แสดงหน้าต่าง" : "OFF — แสดงหน้าต่าง browser"}
-                      </div>
-                    </div>
-                    <div style={{
-                      width: 36, height: 20, borderRadius: 10, flexShrink: 0,
-                      background: headless ? "var(--accent)" : "rgba(255,255,255,0.15)",
-                      position: "relative", transition: "background 0.2s",
-                    }}>
-                      <div style={{
-                        width: 16, height: 16, borderRadius: "50%", background: "#fff",
-                        position: "absolute", top: 2,
-                        left: headless ? 18 : 2,
-                        transition: "left 0.2s",
-                      }} />
-                    </div>
-                  </button>
-
-                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-
                   {/* Monitor mode */}
                   <div style={{ padding: "8px 12px" }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
@@ -287,8 +243,39 @@ export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMo
                       </button>
                     </div>
                     <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
-                      {monitorMode === "inapp" ? "ดูในแอป — แท็บ Monitor" : "ดูภายนอก — เปิด /monitorout ในแท็บใหม่"}
+                      {monitorMode === "inapp" ? "ดูในแอป — แท็บ Monitor" : "ดูภายนอก — เปิด URL ด้านล่างบนจอ Monitor"}
                     </div>
+                    {monitorMode === "outapp" && monitorUrl && (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                          Monitor URL
+                        </div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input
+                            readOnly
+                            value={monitorUrl}
+                            style={{
+                              flex: 1, padding: "6px 8px", borderRadius: 4,
+                              border: "1px solid var(--border)", background: "var(--bg-base)",
+                              color: "var(--text-primary)", fontSize: 11, outline: "none",
+                              minWidth: 0,
+                            }}
+                            onClick={(e) => (e.target as HTMLInputElement).select()}
+                          />
+                          <button
+                            onClick={handleCopyUrl}
+                            style={{
+                              padding: "6px 10px", borderRadius: 4, border: "none",
+                              background: copied ? "#46D369" : "var(--accent)",
+                              color: "#fff", fontSize: 11, fontWeight: 600,
+                              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+                            }}
+                          >
+                            {copied ? "Copied!" : "Copy"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </>

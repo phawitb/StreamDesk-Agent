@@ -6,10 +6,11 @@ from typing import Optional, Callable, Awaitable
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 
+import socket
 from app.config import settings
 from app.agents.base import BaseSiteAgent
 from app.agents.registry import get_agent_for_url
-from app.services.monitor import monitor
+from app.services.monitor import monitor_manager, MonitorController
 
 DOWNLOADS_DIR = Path(__file__).parent.parent.parent / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
@@ -62,6 +63,31 @@ class AgentManager:
         self._current_title: Optional[str] = None
         self._episode_future: Optional[asyncio.Future] = None
         self._episode_callback: Optional[Callable] = None
+        self._user_id: Optional[int] = None
+
+    def set_user(self, user_id: int):
+        self._user_id = user_id
+
+    @staticmethod
+    def _get_local_ip() -> str:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "localhost"
+
+    def _downloads_url(self, filename: str) -> str:
+        host = self._get_local_ip()
+        return f"http://{host}:{settings.port}/downloads/{filename}"
+
+    @property
+    def _monitor(self) -> MonitorController:
+        if self._user_id is None:
+            raise RuntimeError("No user set on agent_manager")
+        return monitor_manager.get(self._user_id)
 
     async def start(self):
         """Launch Playwright and browser."""
@@ -170,9 +196,9 @@ class AgentManager:
     async def play(self, url: str):
         """Play a URL — route to YouTube, Bilibili, or site agent."""
         # Stop current playback before starting new one
-        if monitor.connected and monitor.status.get("playing"):
+        if self._monitor.connected and self._monitor.status.get("playing"):
             logger.info("Stopping current playback before new request")
-            await monitor.pause()
+            await self._monitor.pause()
 
         if YOUTUBE_RE.search(url):
             await self._play_youtube(url)
@@ -185,7 +211,7 @@ class AgentManager:
         """YouTube: download with yt-dlp then play from local file."""
         await self._report("launching", "กำลังเปิด YouTube...")
 
-        if not monitor.connected:
+        if not self._monitor.connected:
             await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
             return
 
@@ -198,15 +224,15 @@ class AgentManager:
             return
 
         filename = local_path.name
-        local_url = f"http://localhost:{settings.port}/downloads/{filename}"
-        await monitor.open_url(local_url, title)
+        local_url = self._downloads_url(filename)
+        await self._monitor.open_url(local_url, title)
         await self._report("playing", f"กำลังเล่น: {title}")
 
     async def _play_with_ytdlp(self, url: str, platform_name: str = "Video"):
         """Download video using yt-dlp and play from local file."""
         await self._report("launching", f"กำลังเปิด {platform_name}...")
 
-        if not monitor.connected:
+        if not self._monitor.connected:
             await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
             return
 
@@ -216,8 +242,8 @@ class AgentManager:
         local_path = await self._download_ytdlp(url)
         if local_path:
             filename = local_path.name
-            local_url = f"http://localhost:{settings.port}/downloads/{filename}"
-            await monitor.open_url(local_url, title)
+            local_url = self._downloads_url(filename)
+            await self._monitor.open_url(local_url, title)
             await self._report("playing", f"กำลังเล่น: {title}")
         else:
             await self._report("error", "ดาวน์โหลดไม่สำเร็จ")
@@ -339,12 +365,12 @@ class AgentManager:
                 m3u8_url = self._captured_m3u8[-1]
                 logger.info("Sending m3u8 to monitor: %s", m3u8_url[:120])
 
-                if not monitor.connected:
+                if not self._monitor.connected:
                     await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
                     return
 
-                await monitor.open_url(m3u8_url, self._current_title)
-                await monitor.unmute()
+                await self._monitor.open_url(m3u8_url, self._current_title)
+                await self._monitor.unmute()
                 await self._report("playing", f"กำลังเล่น: {self._current_title}")
             else:
                 await self._report("error", "ไม่พบ stream URL จากหน้าเว็บ")
@@ -408,7 +434,7 @@ class AgentManager:
         self._current_title = None
 
         # Stop monitor playback
-        await monitor.stop()
+        await self._monitor.stop()
 
         await self._report("idle", "รีเซ็ตเรียบร้อย พร้อมรับคำสั่งใหม่")
         logger.info("Reset complete")
@@ -416,17 +442,17 @@ class AgentManager:
     async def media_control(self, action: str, value: float = 0):
         """Route media controls through monitor."""
         if action == "pause":
-            await monitor.pause()
+            await self._monitor.pause()
         elif action == "resume":
-            await monitor.play()
+            await self._monitor.play()
         elif action == "seek_forward":
-            await monitor.seek_forward(int(value) or 10)
+            await self._monitor.seek_forward(int(value) or 10)
         elif action == "seek_backward":
-            await monitor.seek_backward(int(value) or 10)
+            await self._monitor.seek_backward(int(value) or 10)
         elif action == "seek_to":
-            await monitor.seek_to(value)
+            await self._monitor.seek_to(value)
         elif action == "get_status":
-            return monitor.status
+            return self._monitor.status
         return None
 
 

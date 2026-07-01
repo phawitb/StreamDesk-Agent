@@ -13,9 +13,10 @@ interface Props {
   onSelectEpisode?: (index: number) => void;
   onSelectMovie?: (url: string, poster?: string) => void;
   thinkingText?: string;
+  disabled?: boolean;
 }
 
-export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, onSelectEpisode, onSelectMovie, thinkingText }: Props) {
+export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, onSelectEpisode, onSelectMovie, thinkingText, disabled }: Props) {
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<Movie[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -290,6 +291,21 @@ export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, 
         </div>
       )}
 
+      {/* Disconnected warning */}
+      {disabled && (
+        <div style={{
+          padding: "8px 12px",
+          background: "rgba(134,59,255,0.08)",
+          borderTop: "1px solid var(--border)",
+          fontSize: 12,
+          color: "var(--text-secondary)",
+          textAlign: "center",
+          flexShrink: 0,
+        }}>
+          โปรดเชื่อมต่อจอก่อน หรือปรับเป็นโหมด In-App (Settings &gt; Monitor Mode)
+        </div>
+      )}
+
       {/* Input — always at the very bottom */}
       <form
         onSubmit={handleSubmit}
@@ -301,6 +317,8 @@ export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, 
           background: "var(--bg-surface)",
           flexShrink: 0,
           paddingBottom: "calc(10px + env(safe-area-inset-bottom))",
+          opacity: disabled ? 0.5 : 1,
+          pointerEvents: disabled ? "none" : "auto",
         }}
       >
         <input
@@ -309,14 +327,14 @@ export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, 
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onBlur={() => {
-            // Delay hiding so click on suggestion registers
             setTimeout(() => setShowSuggestions(false), 200);
           }}
           onFocus={() => {
             if (suggestions.length > 0) setShowSuggestions(true);
           }}
-          placeholder="Paste URL or search..."
+          placeholder={disabled ? "Connect a monitor first..." : "Paste URL or search..."}
           enterKeyHint="send"
+          disabled={disabled}
           style={{
             flex: 1,
             padding: "10px 14px",
@@ -330,15 +348,16 @@ export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, 
         />
         <button
           type="submit"
+          disabled={disabled}
           style={{
             padding: "10px 16px",
             borderRadius: 4,
             border: "none",
-            background: "var(--accent)",
+            background: disabled ? "var(--text-muted)" : "var(--accent)",
             color: "#fff",
             fontSize: 14,
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: disabled ? "default" : "pointer",
             flexShrink: 0,
           }}
         >

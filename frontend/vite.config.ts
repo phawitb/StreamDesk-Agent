@@ -55,6 +55,7 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0',
+    allowedHosts: true,
     proxy: {
       '/ws': {
         target: 'ws://localhost:8000',
@@ -63,19 +64,14 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
       },
+      '/auth': {
+        target: 'http://localhost:8000',
+      },
       '/monitorin': {
         target: 'http://localhost:8000',
       },
-      '/monitorout': {
+      '/monitor': {
         target: 'http://localhost:8000',
-      },
-      '/ws/monitorin': {
-        target: 'ws://localhost:8000',
-        ws: true,
-      },
-      '/ws/monitorout': {
-        target: 'ws://localhost:8000',
-        ws: true,
       },
     },
   },

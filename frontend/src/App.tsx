@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "./hooks/useAuth";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { ChatWindow } from "./components/ChatWindow";
 import { StatusBar } from "./components/StatusBar";
 import { MovieBrowser } from "./components/MovieBrowser";
 import { MediaControls } from "./components/MediaControls";
+import { LoginScreen } from "./components/LoginScreen";
 import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage } from "./types/messages";
 import "./App.css";
 
 function App() {
+  const { user, loading: authLoading, login, logout } = useAuth();
   const { connected, monitorInConnected, monitorOutConnected, messages, send } = useWebSocket();
   const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">("browse");
   const [currentPoster, setCurrentPoster] = useState("");
@@ -40,10 +43,8 @@ function App() {
     return () => window.removeEventListener("resize", checkOrientation);
   }, []);
 
-  // Auto-fullscreen when landscape + monitor tab
   const monitorIsFullscreen = activeTab === "monitor" && (isLandscape || monitorFullscreen);
 
-  // Only show important messages in chat (not intermediate loading/ad statuses)
   const SHOW_IN_CHAT_STATES = new Set(["playing", "error", "idle"]);
 
   const displayMessages = useMemo<DisplayMessage[]>(() => {
@@ -115,6 +116,9 @@ function App() {
     return null;
   }, [messages]);
 
+  // Is external mode and no monitor connected?
+  const isExternalDisconnected = monitorMode === "outapp" && !monitorOutConnected;
+
   const handleSelectEpisode = useCallback(
     (index: number) => {
       send({ type: "select_episode", index });
@@ -131,23 +135,16 @@ function App() {
     [send]
   );
 
-  const requireMonitor = useCallback((): boolean => {
-    if (monitorConnected) return true;
-    messages.push({
-      type: "chat",
-      role: "assistant",
-      content: monitorMode === "inapp"
-        ? "กรุณาเปิดแท็บ Monitor ก่อนเพื่อเชื่อมต่อจอแสดงผล"
-        : "กรุณาเปิด /monitorout ในแท็บใหม่ก่อนเพื่อเชื่อมต่อจอแสดงผล",
-    });
-    return false;
-  }, [monitorConnected, monitorMode, messages]);
-
   const handleSend = useCallback(
     (text: string) => {
       const isUrl = text.startsWith("http://") || text.startsWith("https://");
-      if (isUrl && !requireMonitor()) {
+      if (isUrl && isExternalDisconnected) {
         messages.push({ type: "chat", role: "user", content: text });
+        messages.push({
+          type: "chat",
+          role: "assistant",
+          content: "โปรดเชื่อมต่อจอก่อน หรือปรับเป็นโหมด In-App (Settings > Monitor Mode)",
+        });
         setActiveTab("chat");
         return;
       }
@@ -155,12 +152,17 @@ function App() {
       messages.push({ type: "chat", role: "user", content: text });
       setActiveTab("chat");
     },
-    [send, messages, requireMonitor]
+    [send, messages, isExternalDisconnected]
   );
 
   const handleSelectMovie = useCallback(
     (url: string, poster?: string) => {
-      if (!requireMonitor()) {
+      if (isExternalDisconnected) {
+        messages.push({
+          type: "chat",
+          role: "assistant",
+          content: "โปรดเชื่อมต่อจอก่อน หรือปรับเป็นโหมด In-App (Settings > Monitor Mode)",
+        });
         setActiveTab("chat");
         return;
       }
@@ -169,11 +171,25 @@ function App() {
       if (poster) setCurrentPoster(poster);
       setActiveTab("chat");
     },
-    [send, messages, requireMonitor]
+    [send, messages, isExternalDisconnected]
   );
 
   const isPlaying = currentState === "playing";
   const showMonitorTab = monitorMode === "inapp";
+
+  // Auth loading
+  if (authLoading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "var(--bg-base)" }}>
+        <div style={{ color: "var(--text-muted)", fontSize: 14 }}>Loading...</div>
+      </div>
+    );
+  }
+
+  // Not logged in
+  if (!user) {
+    return <LoginScreen onLogin={login} />;
+  }
 
   return (
     <div className={`app ${monitorIsFullscreen ? "monitor-fullscreen" : ""}`}>
@@ -205,8 +221,19 @@ function App() {
             )}
           </nav>
           <div className="sidebar-footer">
+            {user.picture && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px" }}>
+                <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: "50%" }} referrerPolicy="no-referrer" />
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {user.name || user.email}
+                </span>
+              </div>
+            )}
             <StatusBar state={currentState} connected={connected} />
-            <button className="btn-reset" onClick={() => send({ type: "command", action: "reset" })}>Reset</button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button className="btn-reset" onClick={() => send({ type: "command", action: "reset" })} style={{ flex: 1 }}>Reset</button>
+              <button className="btn-reset" onClick={logout}>Logout</button>
+            </div>
           </div>
         </aside>
 
@@ -218,6 +245,8 @@ function App() {
               currentState={currentState}
               monitorMode={monitorMode}
               onMonitorModeChange={setMonitorMode}
+              monitorToken={user.monitor_token}
+              isExternalDisconnected={isExternalDisconnected}
             />
           </div>
           <div className={`panel-chat ${activeTab !== "chat" ? "hidden-mobile" : ""}`}>
@@ -230,6 +259,7 @@ function App() {
               onSelectEpisode={handleSelectEpisode}
               onSelectMovie={handleSelectMovie}
               thinkingText={thinkingText}
+              disabled={isExternalDisconnected}
             />
           </div>
           {showMonitorTab && (

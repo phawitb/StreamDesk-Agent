@@ -65,6 +65,24 @@
         #embed-player { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
         #embed-player.hidden { display: none; }
 
+        /* ── Tap to activate overlay ── */
+        #activate-overlay {
+            position: fixed; inset: 0; z-index: 200;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.85); cursor: pointer;
+        }
+        #activate-overlay.hidden { display: none; }
+        #activate-overlay .tap-icon {
+            width: 80px; height: 80px; border-radius: 50%;
+            background: rgba(99,102,241,0.2); border: 2px solid rgba(99,102,241,0.4);
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 20px; animation: tapPulse 2s infinite;
+        }
+        #activate-overlay .tap-icon svg { width: 36px; height: 36px; color: #818cf8; }
+        #activate-overlay p { color: #e2e8f0; font-size: 18px; font-weight: 500; }
+        #activate-overlay .sub { color: #64748b; font-size: 14px; margin-top: 8px; }
+        @keyframes tapPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
         #toast { position: fixed; top: 30px; left: 50%; transform: translateX(-50%) translateY(-100px); background: rgba(30,30,50,0.9); backdrop-filter: blur(10px); border: 1px solid rgba(99,102,241,0.3); color: #e2e8f0; padding: 12px 24px; border-radius: 12px; font-size: 16px; z-index: 100; transition: transform 0.4s ease; max-width: 80%; }
         #toast.show { transform: translateX(-50%) translateY(0); }
 
@@ -112,6 +130,17 @@
         </div>
     </div>
 
+    <!-- Tap to activate (browser autoplay policy) -->
+    <div id="activate-overlay">
+        <div class="tap-icon">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59"/>
+            </svg>
+        </div>
+        <p>Tap to activate monitor</p>
+        <div class="sub">Required for autoplay to work</div>
+    </div>
+
     <div id="media-container" class="hidden">
         <video id="video-player" class="hidden" playsinline preload="auto" controls></video>
         <iframe id="embed-player" class="hidden" allowfullscreen allow="autoplay; encrypted-media"></iframe>
@@ -134,6 +163,8 @@
         let mediaMode = 'none'; // 'none' | 'video' | 'embed'
         let monitorActive = true; // true = external active (play), false = inapp active (standby)
         let wasPlayingBeforeStandby = false;
+        let userActivated = false; // Has user tapped to allow autoplay?
+        let pendingPlay = null; // {url, platform} queued before activation
 
         const idleScreen = document.getElementById('idle-screen');
         const standbyScreen = document.getElementById('standby-screen');
@@ -142,6 +173,25 @@
         const embedPlayer = document.getElementById('embed-player');
         const toast = document.getElementById('toast');
         const connStatus = document.getElementById('connection-status');
+        const activateOverlay = document.getElementById('activate-overlay');
+
+        // Tap to activate — unlocks autoplay
+        activateOverlay.addEventListener('click', () => {
+            userActivated = true;
+            activateOverlay.classList.add('hidden');
+            // Play a silent buffer to unlock audio context
+            videoPlayer.muted = true;
+            videoPlayer.src = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAA';
+            videoPlayer.play().catch(() => {});
+            videoPlayer.pause();
+            videoPlayer.removeAttribute('src');
+            videoPlayer.muted = isMuted;
+            // If there was a pending play, do it now
+            if (pendingPlay) {
+                openMedia(pendingPlay.url, pendingPlay.platform);
+                pendingPlay = null;
+            }
+        });
 
         // Generate QR code on load
         generateQR();
@@ -270,20 +320,40 @@
         // ── Direct video (mp4, m3u8, local files) ──
 
         function openDirectVideo(url) {
+            // If user hasn't tapped yet, queue it and show overlay
+            if (!userActivated) {
+                pendingPlay = { url, platform: '' };
+                activateOverlay.classList.remove('hidden');
+                return;
+            }
+
             mediaMode = 'video';
             mediaContainer.classList.remove('hidden');
             videoPlayer.classList.remove('hidden');
             embedPlayer.classList.add('hidden');
             videoPlayer.volume = currentVolume / 100;
             videoPlayer.src = url;
-
             videoPlayer.muted = isMuted;
+
             videoPlayer.play().then(() => {
                 if (!document.fullscreenElement) {
                     (videoPlayer.requestFullscreen || videoPlayer.webkitRequestFullscreen || function(){}).call(videoPlayer);
                 }
             }).catch(e => {
-                console.error('Play error:', e.message);
+                console.error('Autoplay blocked, trying muted:', e.message);
+                // Fallback: play muted, then unmute on first user interaction
+                videoPlayer.muted = true;
+                videoPlayer.play().then(() => {
+                    showToast('Tap screen to unmute');
+                    const unmute = () => {
+                        videoPlayer.muted = isMuted;
+                        showToast('Unmuted');
+                        document.removeEventListener('click', unmute);
+                    };
+                    document.addEventListener('click', unmute, { once: true });
+                }).catch(() => {
+                    showToast('Tap screen to start playback');
+                });
             });
         }
 
@@ -312,7 +382,12 @@
         function doPlay() {
             if (mediaMode === 'video') {
                 videoPlayer.muted = isMuted;
-                videoPlayer.play().catch(() => {});
+                videoPlayer.play().catch(e => {
+                    console.error('Play failed:', e.message);
+                    // Try muted fallback
+                    videoPlayer.muted = true;
+                    videoPlayer.play().catch(() => {});
+                });
             }
         }
 
