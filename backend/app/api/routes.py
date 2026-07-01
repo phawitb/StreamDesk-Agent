@@ -60,21 +60,32 @@ async def health():
     return {"status": "ok", "monitor_connected": monitor.connected}
 
 
-# ── Monitor page ──
+# ── Monitor pages ──
 
-@router.get("/monitor", response_class=HTMLResponse)
-async def monitor_page():
-    """Serve the monitor HTML page for video playback."""
+@router.get("/monitorin", response_class=HTMLResponse)
+async def monitor_in_page():
+    """Serve the in-app monitor page."""
     html_path = TEMPLATES_DIR / "monitor.html"
-    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+    html = html_path.read_text(encoding="utf-8")
+    html = html.replace("/ws/monitor", "/ws/monitorin")
+    return HTMLResponse(html)
 
 
-@router.websocket("/ws/monitor")
-async def ws_monitor(ws: WebSocket):
-    """WebSocket for the monitor page — receives commands, sends status back."""
+@router.get("/monitorout", response_class=HTMLResponse)
+async def monitor_out_page():
+    """Serve the external monitor page."""
+    html_path = TEMPLATES_DIR / "monitor.html"
+    html = html_path.read_text(encoding="utf-8")
+    html = html.replace("/ws/monitor", "/ws/monitorout")
+    return HTMLResponse(html)
+
+
+@router.websocket("/ws/monitorin")
+async def ws_monitor_in(ws: WebSocket):
+    """WebSocket for in-app monitor."""
     await ws.accept()
-    await monitor.register(ws)
-    await broadcast(ChatMessage(content="Monitor connected").model_dump())
+    await monitor.register(ws, "in")
+    await broadcast({"type": "monitor_status", "in_connected": monitor.in_connected, "out_connected": monitor.out_connected})
 
     try:
         while True:
@@ -88,11 +99,55 @@ async def ws_monitor(ws: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        await monitor.unregister()
-        await broadcast(ChatMessage(content="Monitor disconnected").model_dump())
+        await monitor.unregister("in")
+        await broadcast({"type": "monitor_status", "in_connected": monitor.in_connected, "out_connected": monitor.out_connected})
+
+
+@router.websocket("/ws/monitorout")
+async def ws_monitor_out(ws: WebSocket):
+    """WebSocket for external monitor."""
+    await ws.accept()
+    await monitor.register(ws, "out")
+    await broadcast({"type": "monitor_status", "in_connected": monitor.in_connected, "out_connected": monitor.out_connected})
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                data = json.loads(raw)
+                if data.get("type") == "status":
+                    monitor.update_status(data)
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await monitor.unregister("out")
+        await broadcast({"type": "monitor_status", "in_connected": monitor.in_connected, "out_connected": monitor.out_connected})
 
 
 # ── Movie API ──
+
+@router.get("/api/settings")
+async def get_settings():
+    """Get current app settings."""
+    from app.config import settings
+    return {"headless": settings.headless}
+
+
+@router.patch("/api/settings")
+async def update_settings(body: dict):
+    """Update app settings (headless, etc.)."""
+    from app.config import settings
+    if "headless" in body:
+        settings.headless = bool(body["headless"])
+        logger.info("Headless mode set to %s", settings.headless)
+    if "monitor_mode" in body:
+        mode = "in" if body["monitor_mode"] == "inapp" else "out"
+        await monitor.set_active_mode(mode)
+        logger.info("Monitor mode set to %s", mode)
+    return {"headless": settings.headless}
+
 
 @router.get("/api/movies")
 async def list_movies(page: int = 1, category: str = ""):
@@ -122,6 +177,23 @@ async def _save_movies_bg(movies: list[dict]):
 async def list_categories():
     """Get genre/category list."""
     return await scrape_categories()
+
+
+@router.get("/api/recent")
+async def recent_movies_api(limit: int = 20):
+    """Get recently added movies from DB."""
+    from app.services.database import get_recent_movies
+    return await get_recent_movies(limit=limit)
+
+
+@router.get("/api/search")
+async def search_movies_api(q: str = "", limit: int = 8):
+    """Search movies in local DB by title (real-time autocomplete)."""
+    from app.services.database import search_movies
+    if not q.strip():
+        return []
+    results = await search_movies(q.strip(), limit=limit)
+    return results
 
 
 @router.post("/api/sync")
@@ -188,6 +260,11 @@ async def websocket_endpoint(ws: WebSocket):
     # Send initial status
     await ws.send_text(json.dumps(
         StatusMessage(state=AgentState.IDLE, message="พร้อมรับคำสั่ง").model_dump(),
+        ensure_ascii=False,
+    ))
+    # Send current monitor connection status
+    await ws.send_text(json.dumps(
+        {"type": "monitor_status", "in_connected": monitor.in_connected, "out_connected": monitor.out_connected},
         ensure_ascii=False,
     ))
 
@@ -280,6 +357,8 @@ async def websocket_endpoint(ws: WebSocket):
                     await monitor.volume_up(int(value) or 10)
                 elif action == "volume_down":
                     await monitor.volume_down(int(value) or 10)
+                elif action == "set_volume":
+                    await monitor.set_volume(int(value))
                 elif action == "mute":
                     await monitor.mute()
                 elif action == "unmute":

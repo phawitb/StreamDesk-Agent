@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientMessage, ServerMessage } from "../types/messages";
 
-const WS_URL = `ws://${window.location.hostname}:8000/ws`;
+const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+const WS_URL = `${wsProto}//${window.location.host}/ws`;
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
+  const [monitorInConnected, setMonitorInConnected] = useState(false);
+  const [monitorOutConnected, setMonitorOutConnected] = useState(false);
   const [messages, setMessages] = useState<ServerMessage[]>([]);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -25,6 +28,11 @@ export function useWebSocket() {
         console.log("WS received:", data.type, data);
         if (data.type === "media_status") {
           window.dispatchEvent(new CustomEvent("media_status", { detail: data }));
+          return;
+        }
+        if (data.type === "monitor_status") {
+          setMonitorInConnected(!!data.in_connected);
+          setMonitorOutConnected(!!data.out_connected);
           return;
         }
         const msg: ServerMessage = data;
@@ -62,5 +70,5 @@ export function useWebSocket() {
     }
   }, []);
 
-  return { connected, messages, send };
+  return { connected, monitorInConnected, monitorOutConnected, messages, send };
 }

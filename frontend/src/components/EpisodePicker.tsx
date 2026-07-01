@@ -9,39 +9,30 @@ export function EpisodePicker({ episodes, onSelect }: Props) {
   return (
     <div
       style={{
-        margin: "8px 16px",
-        padding: 16,
-        background: "#313244",
-        borderRadius: 12,
-        border: "1px solid #45475a",
+        margin: "8px 12px",
+        padding: 12,
+        background: "var(--bg-elevated)",
+        borderRadius: 6,
       }}
     >
-      <div style={{ marginBottom: 12, fontSize: 14, fontWeight: 600, color: "#cdd6f4" }}>
-        เลือกตอนที่ต้องการดู:
+      <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+        Select Episode
       </div>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          maxHeight: 240,
-          overflowY: "auto",
-        }}
-      >
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 200, overflowY: "auto" }}>
         {episodes.map((ep) => (
           <button
             key={ep.index}
             onClick={() => onSelect(ep.index)}
             style={{
-              padding: "8px 14px",
-              borderRadius: 8,
-              border: ep.active ? "2px solid #89b4fa" : "1px solid #585b70",
-              background: ep.active ? "#89b4fa" : "#45475a",
-              color: ep.active ? "#1e1e2e" : "#cdd6f4",
-              fontSize: 13,
-              fontWeight: ep.active ? 700 : 400,
+              padding: "6px 14px",
+              borderRadius: 4,
+              border: ep.active ? "none" : "1px solid var(--border)",
+              background: ep.active ? "var(--accent)" : "transparent",
+              color: ep.active ? "#fff" : "var(--text-primary)",
+              fontSize: 12,
+              fontWeight: ep.active ? 700 : 500,
               cursor: "pointer",
-              minWidth: 56,
+              minWidth: 50,
               textAlign: "center",
             }}
           >

@@ -13,27 +13,23 @@ export function MessageBubble({ message }: Props) {
       style={{
         display: "flex",
         justifyContent: isUser ? "flex-end" : "flex-start",
-        marginBottom: 8,
-        padding: "0 16px",
+        marginBottom: 4,
+        padding: "0 12px",
+        animation: "fadeIn 0.15s ease",
       }}
     >
       <div
         style={{
-          maxWidth: "75%",
-          padding: "10px 14px",
-          borderRadius: 12,
-          background: isUser
-            ? "#89b4fa"
-            : isSystem
-            ? "#313244"
-            : "#45475a",
-          color: isUser ? "#1e1e2e" : "#cdd6f4",
-          fontSize: 14,
+          maxWidth: "82%",
+          padding: "8px 12px",
+          borderRadius: isUser ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
+          background: isUser ? "var(--accent)" : isSystem ? "var(--bg-elevated)" : "var(--bg-highlight)",
+          color: isUser ? "#fff" : "var(--text-primary)",
+          fontSize: 13,
           lineHeight: 1.5,
-          ...(isSystem && {
-            fontStyle: "italic",
-            fontSize: 13,
-          }),
+          wordBreak: "break-all",
+          overflowWrap: "anywhere",
+          ...(isSystem && { fontSize: 12, color: "var(--text-muted)" }),
         }}
       >
         {message.content}

@@ -1,67 +1,112 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { ChatWindow } from "./components/ChatWindow";
 import { StatusBar } from "./components/StatusBar";
 import { MovieBrowser } from "./components/MovieBrowser";
-import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage, RecommendedMovie } from "./types/messages";
+import { MediaControls } from "./components/MediaControls";
+import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage } from "./types/messages";
+import "./App.css";
 
 function App() {
-  const { connected, messages, send } = useWebSocket();
+  const { connected, monitorInConnected, monitorOutConnected, messages, send } = useWebSocket();
+  const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">("browse");
+  const [currentPoster, setCurrentPoster] = useState("");
+  const [monitorMode, setMonitorMode] = useState<"inapp" | "outapp">(() => {
+    return (localStorage.getItem("monitorMode") as "inapp" | "outapp") || "outapp";
+  });
+  const [monitorFullscreen, setMonitorFullscreen] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(false);
+
+  // Persist monitor mode and sync to backend
+  useEffect(() => {
+    localStorage.setItem("monitorMode", monitorMode);
+    fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ monitor_mode: monitorMode }),
+    }).catch(() => {});
+  }, [monitorMode]);
+
+  const monitorConnected = monitorMode === "inapp" ? monitorInConnected : monitorOutConnected;
+
+  // Detect landscape orientation
+  useEffect(() => {
+    const checkOrientation = () => {
+      const landscape = window.innerWidth > window.innerHeight;
+      setIsLandscape(landscape);
+    };
+    checkOrientation();
+    window.addEventListener("resize", checkOrientation);
+    return () => window.removeEventListener("resize", checkOrientation);
+  }, []);
+
+  // Auto-fullscreen when landscape + monitor tab
+  const monitorIsFullscreen = activeTab === "monitor" && (isLandscape || monitorFullscreen);
+
+  // Only show important messages in chat (not intermediate loading/ad statuses)
+  const SHOW_IN_CHAT_STATES = new Set(["playing", "error", "idle"]);
 
   const displayMessages = useMemo<DisplayMessage[]>(() => {
     return messages
-      .filter((m) => m.type === "chat" || m.type === "status" || m.type === "error" || m.type === "movie_recommendations")
+      .filter((m) => {
+        if (m.type === "chat" || m.type === "error" || m.type === "movie_recommendations") return true;
+        if (m.type === "status") {
+          const state = (m as { state: string }).state;
+          return SHOW_IN_CHAT_STATES.has(state);
+        }
+        return false;
+      })
       .map((m, i) => {
         if (m.type === "chat") {
-          return {
-            id: `msg-${i}`,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            timestamp: new Date(),
-          };
+          return { id: `msg-${i}`, role: m.role as "user" | "assistant", content: m.content, timestamp: new Date() };
         }
         if (m.type === "status") {
-          return {
-            id: `status-${i}`,
-            role: "system" as const,
-            content: m.message,
-            timestamp: new Date(m.timestamp),
-            state: m.state,
-          };
+          return { id: `status-${i}`, role: "system" as const, content: m.message, timestamp: new Date(m.timestamp), state: m.state };
         }
         if (m.type === "movie_recommendations") {
           const rec = m as MovieRecommendationMessage;
-          return {
-            id: `rec-${i}`,
-            role: "assistant" as const,
-            content: rec.message,
-            timestamp: new Date(),
-            recommendations: rec.movies,
-          };
+          return { id: `rec-${i}`, role: "assistant" as const, content: rec.message, timestamp: new Date(), recommendations: rec.movies };
         }
-        return {
-          id: `err-${i}`,
-          role: "system" as const,
-          content: `Error: ${m.message}`,
-          timestamp: new Date(),
-        };
+        return { id: `err-${i}`, role: "system" as const, content: `Error: ${m.message}`, timestamp: new Date() };
       });
+  }, [messages]);
+
+  const thinkingText = useMemo<string>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].type === "status") {
+        const s = messages[i] as { state: string; message: string };
+        if (!SHOW_IN_CHAT_STATES.has(s.state)) return s.message;
+        return "";
+      }
+    }
+    return "";
   }, [messages]);
 
   const currentState = useMemo<AgentState>(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type === "status") {
-        return (messages[i] as { state: AgentState }).state;
-      }
+      if (messages[i].type === "status") return (messages[i] as { state: AgentState }).state;
     }
     return "idle";
   }, [messages]);
 
+  const currentTitle = useMemo<string>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].type === "status") {
+        const msg = messages[i] as { state: string; message: string; title?: string };
+        if (msg.title) return msg.title;
+        if (msg.state === "playing" && msg.message) {
+          const match = msg.message.match(/กำลังเล่น:\s*(.+)/);
+          if (match) return match[1];
+          return msg.message;
+        }
+      }
+    }
+    return "";
+  }, [messages]);
+
   const episodes = useMemo<EpisodeInfo[] | null>(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type === "episode_list") {
-        return (messages[i] as EpisodeListMessage).episodes;
-      }
+      if (messages[i].type === "episode_list") return (messages[i] as EpisodeListMessage).episodes;
       if (messages[i].type === "status") {
         const state = (messages[i] as { state: string }).state;
         if (state === "loading_player" || state === "playing") return null;
@@ -74,11 +119,7 @@ function App() {
     (index: number) => {
       send({ type: "select_episode", index });
       const ep = episodes?.find((e) => e.index === index);
-      messages.push({
-        type: "chat",
-        role: "user",
-        content: `เลือก ${ep?.text || `ตอนที่ ${index + 1}`}`,
-      });
+      messages.push({ type: "chat", role: "user", content: `เลือก ${ep?.text || `ตอนที่ ${index + 1}`}` });
     },
     [send, messages, episodes]
   );
@@ -90,115 +131,146 @@ function App() {
     [send]
   );
 
+  const requireMonitor = useCallback((): boolean => {
+    if (monitorConnected) return true;
+    messages.push({
+      type: "chat",
+      role: "assistant",
+      content: monitorMode === "inapp"
+        ? "กรุณาเปิดแท็บ Monitor ก่อนเพื่อเชื่อมต่อจอแสดงผล"
+        : "กรุณาเปิด /monitorout ในแท็บใหม่ก่อนเพื่อเชื่อมต่อจอแสดงผล",
+    });
+    return false;
+  }, [monitorConnected, monitorMode, messages]);
+
   const handleSend = useCallback(
     (text: string) => {
       const isUrl = text.startsWith("http://") || text.startsWith("https://");
-      send({
-        type: "play_request",
-        ...(isUrl ? { url: text } : { query: text }),
-      });
+      if (isUrl && !requireMonitor()) {
+        messages.push({ type: "chat", role: "user", content: text });
+        setActiveTab("chat");
+        return;
+      }
+      send({ type: "play_request", ...(isUrl ? { url: text } : { query: text }) });
       messages.push({ type: "chat", role: "user", content: text });
+      setActiveTab("chat");
     },
-    [send, messages]
+    [send, messages, requireMonitor]
   );
 
   const handleSelectMovie = useCallback(
-    (url: string) => {
+    (url: string, poster?: string) => {
+      if (!requireMonitor()) {
+        setActiveTab("chat");
+        return;
+      }
       send({ type: "play_request", url });
       messages.push({ type: "chat", role: "user", content: url });
+      if (poster) setCurrentPoster(poster);
+      setActiveTab("chat");
     },
-    [send, messages]
+    [send, messages, requireMonitor]
   );
 
+  const isPlaying = currentState === "playing";
+  const showMonitorTab = monitorMode === "inapp";
+
   return (
-    <div
-      style={{
-        height: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        background: "#1e1e2e",
-        color: "#cdd6f4",
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          padding: "12px 16px",
-          background: "#181825",
-          borderBottom: "1px solid #313244",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <span style={{ fontSize: 20 }}>🎬</span>
-        <span style={{ fontSize: 16, fontWeight: 600 }}>StreamDesk</span>
-        <StatusBar state={currentState} connected={connected} />
-        <div style={{ marginLeft: "auto" }}>
-          <button
-            onClick={() => send({ type: "command", action: "reset" })}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 6,
-              border: "1px solid #f38ba8",
-              background: "transparent",
-              color: "#f38ba8",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Reset
+    <div className={`app ${monitorIsFullscreen ? "monitor-fullscreen" : ""}`}>
+      <div className="app-body">
+        {/* Sidebar */}
+        <aside className="sidebar">
+          <div className="sidebar-logo">
+            <svg viewBox="0 0 24 24" fill="none" style={{ width: 22, height: 22 }}>
+              <rect x="2" y="3" width="20" height="18" rx="2" fill="var(--accent)" />
+              <path d="M10 8v8l6-4-6-4z" fill="#fff" />
+            </svg>
+            StreamDesk
+          </div>
+          <nav className="sidebar-nav">
+            <button className={`sidebar-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
+              Browse
+            </button>
+            <button className={`sidebar-nav-item ${activeTab === "chat" ? "active" : ""}`} onClick={() => setActiveTab("chat")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+              Chat
+            </button>
+            {showMonitorTab && (
+              <button className={`sidebar-nav-item ${activeTab === "monitor" ? "active" : ""}`} onClick={() => setActiveTab("monitor")}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+                Monitor
+                {!monitorConnected && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", marginLeft: "auto" }} />}
+              </button>
+            )}
+          </nav>
+          <div className="sidebar-footer">
+            <StatusBar state={currentState} connected={connected} />
+            <button className="btn-reset" onClick={() => send({ type: "command", action: "reset" })}>Reset</button>
+          </div>
+        </aside>
+
+        <div className="main-content">
+          <div className={`panel-browse ${activeTab !== "browse" ? "hidden-mobile" : ""}`}>
+            <MovieBrowser
+              onSelectMovie={handleSelectMovie}
+              connected={monitorConnected}
+              currentState={currentState}
+              monitorMode={monitorMode}
+              onMonitorModeChange={setMonitorMode}
+            />
+          </div>
+          <div className={`panel-chat ${activeTab !== "chat" ? "hidden-mobile" : ""}`}>
+            <ChatWindow
+              messages={displayMessages}
+              onSend={handleSend}
+              isPlaying={isPlaying}
+              onDownload={() => send({ type: "command", action: "download" })}
+              episodes={episodes}
+              onSelectEpisode={handleSelectEpisode}
+              onSelectMovie={handleSelectMovie}
+              thinkingText={thinkingText}
+            />
+          </div>
+          {showMonitorTab && (
+            <div
+              className={`panel-monitor ${activeTab !== "monitor" ? "hidden-mobile" : ""}`}
+              onClick={() => {
+                if (activeTab === "monitor" && !isLandscape) {
+                  setMonitorFullscreen((f) => !f);
+                }
+              }}
+            >
+              <iframe
+                src="/monitorin"
+                style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
+                allow="autoplay; fullscreen"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="now-playing-bar">
+        <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} />
+      </div>
+
+      <nav className="bottom-nav">
+        <button className={`bottom-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
+          Browse
+        </button>
+        {showMonitorTab && (
+          <button className={`bottom-nav-item ${activeTab === "monitor" ? "active" : ""}`} onClick={() => setActiveTab("monitor")}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+            Monitor
           </button>
-        </div>
-      </div>
-
-      {/* Main: Browse left + Chat right */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Browse panel */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            borderRight: "1px solid #313244",
-            minWidth: 0,
-          }}
-        >
-          <MovieBrowser onSelectMovie={handleSelectMovie} />
-        </div>
-
-        {/* Chat panel */}
-        <div
-          style={{
-            width: 360,
-            flexShrink: 0,
-            display: "flex",
-            flexDirection: "column",
-            background: "#1e1e2e",
-          }}
-        >
-          <ChatWindow
-            messages={displayMessages}
-            onSend={handleSend}
-            isPlaying={currentState === "playing"}
-            onDownload={() => send({ type: "command", action: "download" })}
-            onMediaControl={handleMediaControl}
-            episodes={episodes}
-            onSelectEpisode={handleSelectEpisode}
-            onSelectMovie={handleSelectMovie}
-          />
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
-      `}</style>
+        )}
+        <button className={`bottom-nav-item ${activeTab === "chat" ? "active" : ""}`} onClick={() => setActiveTab("chat")}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+          Chat
+        </button>
+      </nav>
     </div>
   );
 }

@@ -1,29 +1,89 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Movie, MoviesResponse } from "../types/movie";
+import type { AgentState } from "../types/messages";
 
 interface Category {
   name: string;
   slug: string;
 }
 
-interface Props {
-  onSelectMovie: (url: string) => void;
+interface HistoryItem {
+  title: string;
+  url: string;
+  poster: string;
+  timestamp: number;
 }
 
-export function MovieBrowser({ onSelectMovie }: Props) {
+interface Props {
+  onSelectMovie: (url: string, poster?: string) => void;
+  connected?: boolean;
+  currentState?: AgentState;
+  monitorMode?: "inapp" | "outapp";
+  onMonitorModeChange?: (mode: "inapp" | "outapp") => void;
+}
+
+const HISTORY_KEY = "streamdesk_history";
+const MAX_HISTORY = 30;
+
+function getHistory(): HistoryItem[] {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function addToHistory(movie: { title?: string; url: string; poster?: string }) {
+  const history = getHistory().filter((h) => h.url !== movie.url);
+  history.unshift({
+    title: movie.title || "",
+    url: movie.url,
+    poster: movie.poster || "",
+    timestamp: Date.now(),
+  });
+  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  return history;
+}
+
+function formatTimeAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+export function MovieBrowser({ onSelectMovie, connected, currentState, monitorMode = "outapp", onMonitorModeChange }: Props) {
   const [movies, setMovies] = useState<Movie[]>([]);
+  const [recentMovies, setRecentMovies] = useState<Movie[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>(getHistory);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [activeCategory, setActiveCategory] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [headless, setHeadless] = useState(false);
+  const recentRef = useRef<HTMLDivElement>(null);
 
-  // Fetch categories once
   useEffect(() => {
     fetch("/api/categories")
       .then((r) => r.json())
       .then((data: Category[]) => setCategories(data))
+      .catch(() => {});
+  }, []);
+
+  // Fetch recent movies
+  useEffect(() => {
+    fetch("/api/recent?limit=20")
+      .then((r) => r.json())
+      .then((data: Movie[]) => setRecentMovies(data))
       .catch(() => {});
   }, []);
 
@@ -52,263 +112,535 @@ export function MovieBrowser({ onSelectMovie }: Props) {
     setActiveCategory(slug === activeCategory ? "" : slug);
   };
 
-  const catChipStyle = (active: boolean): React.CSSProperties => ({
-    padding: "4px 12px",
-    borderRadius: 20,
-    border: active ? "1px solid #89b4fa" : "1px solid #45475a",
-    background: active ? "#89b4fa" : "transparent",
-    color: active ? "#1e1e2e" : "#a6adc8",
-    fontSize: 12,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-    fontWeight: active ? 600 : 400,
-  });
+  const handleSelectMovieWithHistory = useCallback(
+    (url: string, poster?: string, title?: string) => {
+      const updated = addToHistory({ title, url, poster });
+      setHistory(updated);
+      onSelectMovie(url, poster);
+    },
+    [onSelectMovie]
+  );
+
+  // Fetch current headless setting
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => setHeadless(data.headless ?? false))
+      .catch(() => {});
+  }, []);
 
   const handleSync = async () => {
     setSyncing(true);
+    setShowSettings(false);
     try {
       await fetch("/api/sync", { method: "POST" });
     } catch (e) {
       console.error("Sync failed:", e);
     }
-    // Sync runs in background on server, re-enable button after a short delay
     setTimeout(() => setSyncing(false), 3000);
   };
 
+  const handleToggleHeadless = async () => {
+    const newVal = !headless;
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ headless: newVal }),
+      });
+      setHeadless(newVal);
+    } catch (e) {
+      console.error("Failed to update headless:", e);
+    }
+  };
+
+  // Connection status helpers
+  const isConnected = !!connected;
+  const statusColor = isConnected ? "#46D369" : "var(--accent)";
+  const statusLabel = isConnected ? "Monitor Connected" : "Monitor Disconnected";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Category chips */}
-      <div
-        style={{
-          display: "flex",
-          gap: 6,
-          padding: "10px 16px",
-          overflowX: "auto",
-          borderBottom: "1px solid #313244",
-          flexShrink: 0,
-          alignItems: "center",
-        }}
-      >
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          style={{
-            padding: "4px 10px",
-            borderRadius: 6,
-            border: "1px solid #45475a",
-            background: syncing ? "#45475a" : "#181825",
-            color: syncing ? "#6c7086" : "#a6e3a1",
-            fontSize: 12,
-            cursor: syncing ? "default" : "pointer",
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-        >
-          {syncing ? "Syncing..." : "Sync DB"}
-        </button>
-        <button
-          style={catChipStyle(activeCategory === "")}
-          onClick={() => handleCategoryClick("")}
-        >
-          All
-        </button>
-        {categories.map((cat) => (
-          <button
-            key={cat.slug}
-            style={catChipStyle(activeCategory === cat.slug)}
-            onClick={() => handleCategoryClick(cat.slug)}
-          >
-            {cat.name}
-          </button>
-        ))}
-      </div>
+      {/* Header */}
+      <div style={{ padding: "20px 24px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.3, color: "var(--text-primary)" }}>
+          Browse
+        </h1>
 
-      {/* Movie grid */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: 16,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-          gap: 12,
-          alignContent: "start",
-        }}
-      >
-        {loading && (
-          <div style={{ gridColumn: "1 / -1", textAlign: "center", color: "#6c7086", padding: 40 }}>
-            Loading...
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Connection status */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 20, background: "var(--bg-elevated)" }}>
+            <div style={{
+              width: 7, height: 7, borderRadius: "50%", background: statusColor, flexShrink: 0,
+              boxShadow: isConnected ? `0 0 6px ${statusColor}` : "none",
+            }} />
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+              {statusLabel}
+            </span>
           </div>
-        )}
-        {!loading && movies.length === 0 && (
-          <div style={{ gridColumn: "1 / -1", textAlign: "center", color: "#6c7086", padding: 40 }}>
-            No movies found
-          </div>
-        )}
-        {!loading &&
-          movies.map((movie) => (
-            <div
-              key={movie.url}
-              onClick={() => onSelectMovie(movie.url)}
+
+          {/* Settings gear */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setShowSettings(!showSettings)}
               style={{
-                cursor: "pointer",
-                borderRadius: 8,
-                overflow: "hidden",
-                background: "#313244",
-                border: "1px solid #45475a",
-                transition: "transform 0.15s, border-color 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "scale(1.03)";
-                e.currentTarget.style.borderColor = "#89b4fa";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "scale(1)";
-                e.currentTarget.style.borderColor = "#45475a";
+                width: 34, height: 34, borderRadius: "50%", border: "1px solid var(--border)",
+                background: showSettings ? "var(--bg-elevated)" : "transparent",
+                color: "var(--text-secondary)", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
               }}
             >
-              {/* Poster */}
-              <div
-                style={{
-                  width: "100%",
-                  paddingTop: "140%",
-                  position: "relative",
-                  background: "#45475a",
-                }}
-              >
-                {movie.poster && (
-                  <img
-                    src={movie.poster}
-                    alt={movie.title}
-                    loading="lazy"
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                    }}
-                  />
-                )}
-                {/* Badges */}
-                <div style={{ position: "absolute", top: 6, left: 6, display: "flex", gap: 4 }}>
-                  {movie.quality && (
-                    <span
-                      style={{
-                        background: "#f38ba8",
-                        color: "#1e1e2e",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                      }}
-                    >
-                      {movie.quality}
-                    </span>
-                  )}
-                  {movie.language && (
-                    <span
-                      style={{
-                        background: "#a6e3a1",
-                        color: "#1e1e2e",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                      }}
-                    >
-                      {movie.language}
-                    </span>
-                  )}
-                </div>
-                {movie.rating && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      top: 6,
-                      right: 6,
-                      background: "#f9e2af",
-                      color: "#1e1e2e",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: "2px 6px",
-                      borderRadius: 4,
-                    }}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+              </svg>
+            </button>
+
+            {/* Settings dropdown */}
+            {showSettings && (
+              <>
+                <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setShowSettings(false)} />
+                <div style={{
+                  position: "absolute", right: 0, top: 42, zIndex: 100,
+                  background: "var(--bg-elevated)", border: "1px solid var(--border)",
+                  borderRadius: 8, padding: 6, minWidth: 200,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                }}>
+                  <button
+                    onClick={handleSync}
+                    disabled={syncing}
+                    style={menuItemStyle(syncing)}
+                    onMouseEnter={(e) => !syncing && (e.currentTarget.style.background = "var(--bg-highlight)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
-                    {movie.rating}
-                  </span>
-                )}
-              </div>
-              {/* Title */}
-              <div
-                style={{
-                  padding: "8px 8px",
-                  fontSize: 12,
-                  lineHeight: 1.3,
-                  color: "#cdd6f4",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                }}
-              >
-                {movie.title}
-              </div>
-            </div>
-          ))}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16, flexShrink: 0 }}>
+                      <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
+                      <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+                    </svg>
+                    {syncing ? "Syncing..." : "Sync Movies"}
+                  </button>
+
+                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+
+                  <button
+                    onClick={handleToggleHeadless}
+                    style={menuItemStyle(false)}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-highlight)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16, flexShrink: 0 }}>
+                      {headless ? (
+                        <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></>
+                      ) : (
+                        <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>
+                      )}
+                    </svg>
+                    <div style={{ flex: 1 }}>
+                      Headless Browser
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
+                        {headless ? "ON — ไม่แสดงหน้าต่าง" : "OFF — แสดงหน้าต่าง browser"}
+                      </div>
+                    </div>
+                    <div style={{
+                      width: 36, height: 20, borderRadius: 10, flexShrink: 0,
+                      background: headless ? "var(--accent)" : "rgba(255,255,255,0.15)",
+                      position: "relative", transition: "background 0.2s",
+                    }}>
+                      <div style={{
+                        width: 16, height: 16, borderRadius: "50%", background: "#fff",
+                        position: "absolute", top: 2,
+                        left: headless ? 18 : 2,
+                        transition: "left 0.2s",
+                      }} />
+                    </div>
+                  </button>
+
+                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+
+                  {/* Monitor mode */}
+                  <div style={{ padding: "8px 12px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
+                      Monitor Mode
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        onClick={() => onMonitorModeChange?.("inapp")}
+                        style={{
+                          flex: 1, padding: "7px 0", borderRadius: 6, border: "none",
+                          background: monitorMode === "inapp" ? "var(--accent)" : "rgba(255,255,255,0.08)",
+                          color: monitorMode === "inapp" ? "#fff" : "var(--text-secondary)",
+                          fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        }}
+                      >
+                        In-App
+                      </button>
+                      <button
+                        onClick={() => onMonitorModeChange?.("outapp")}
+                        style={{
+                          flex: 1, padding: "7px 0", borderRadius: 6, border: "none",
+                          background: monitorMode === "outapp" ? "var(--accent)" : "rgba(255,255,255,0.08)",
+                          color: monitorMode === "outapp" ? "#fff" : "var(--text-secondary)",
+                          fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        }}
+                      >
+                        External
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
+                      {monitorMode === "inapp" ? "ดูในแอป — แท็บ Monitor" : "ดูภายนอก — เปิด /monitorout ในแท็บใหม่"}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
+      {/* Scroll wrapper */}
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+
+        {/* History — horizontal slider like Recently Added */}
+        {history.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ padding: "16px 24px 8px", fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>
+              History
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                padding: "0 24px 12px",
+                overflowX: "auto",
+                scrollSnapType: "x mandatory",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              {history.map((item) => (
+                <div
+                  key={item.url}
+                  onClick={() => handleSelectMovieWithHistory(item.url, item.poster, item.title)}
+                  style={{
+                    flexShrink: 0,
+                    width: 110,
+                    cursor: "pointer",
+                    scrollSnapAlign: "start",
+                    transition: "transform 0.2s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.05)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+                >
+                  <div style={{
+                    width: "100%", aspectRatio: "2 / 3", borderRadius: 6,
+                    overflow: "hidden", background: "#2A2A2A", position: "relative",
+                  }}>
+                    {item.poster && (
+                      <img src={item.poster} alt={item.title} loading="lazy"
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                    )}
+                    {/* Time ago badge */}
+                    <span style={{
+                      position: "absolute", bottom: 4, left: 4,
+                      background: "rgba(0,0,0,0.75)", color: "rgba(255,255,255,0.8)",
+                      fontSize: 8, fontWeight: 600, padding: "2px 5px",
+                      borderRadius: 3, backdropFilter: "blur(4px)",
+                    }}>
+                      {formatTimeAgo(item.timestamp)}
+                    </span>
+                  </div>
+                  <div style={{
+                    fontSize: 11, fontWeight: 600, color: "var(--text-primary)",
+                    marginTop: 6, lineHeight: 1.3,
+                    overflow: "hidden", textOverflow: "ellipsis",
+                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                  }}>
+                    {item.title || "Untitled"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Recently Added — horizontal slider */}
+        {recentMovies.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ padding: "16px 24px 8px", fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>
+              Recently Added
+            </div>
+            <div
+              ref={recentRef}
+              style={{
+                display: "flex",
+                gap: 10,
+                padding: "0 24px 12px",
+                overflowX: "auto",
+                scrollSnapType: "x mandatory",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              {recentMovies.map((movie) => (
+                <div
+                  key={movie.url}
+                  onClick={() => handleSelectMovieWithHistory(movie.url, movie.poster, movie.title)}
+                  style={{
+                    flexShrink: 0,
+                    width: 110,
+                    cursor: "pointer",
+                    scrollSnapAlign: "start",
+                    transition: "transform 0.2s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.05)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+                >
+                  <div style={{
+                    width: "100%", aspectRatio: "2 / 3", borderRadius: 6,
+                    overflow: "hidden", background: "#2A2A2A", position: "relative",
+                  }}>
+                    {movie.poster && (
+                      <img src={movie.poster} alt={movie.title} loading="lazy"
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                    )}
+                    {movie.quality && (
+                      <span style={{
+                        position: "absolute", top: 4, left: 4,
+                        background: "var(--accent)", color: "#fff",
+                        fontSize: 8, fontWeight: 700, padding: "1px 5px",
+                        borderRadius: 3, textTransform: "uppercase",
+                      }}>
+                        {movie.quality}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{
+                    fontSize: 11, fontWeight: 600, color: "var(--text-primary)",
+                    marginTop: 6, lineHeight: 1.3,
+                    overflow: "hidden", textOverflow: "ellipsis",
+                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                  }}>
+                    {movie.title}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Category chips — sticky on scroll */}
         <div
+          className="category-bar"
           style={{
             display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
             gap: 8,
-            padding: "10px 16px",
-            borderTop: "1px solid #313244",
-            background: "#181825",
+            padding: "6px 24px 14px",
+            overflowX: "auto",
             flexShrink: 0,
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+            background: "var(--bg-base)",
           }}
         >
-          <button
-            onClick={() => fetchMovies(page - 1, activeCategory)}
-            disabled={page <= 1 || loading}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 6,
-              border: "1px solid #45475a",
-              background: page <= 1 ? "#1e1e2e" : "#313244",
-              color: page <= 1 ? "#585b70" : "#cdd6f4",
-              cursor: page <= 1 ? "default" : "pointer",
-              fontSize: 13,
-            }}
-          >
-            {"<"}
-          </button>
-          <span style={{ fontSize: 13, color: "#a6adc8" }}>
-            {page} / {totalPages}
-          </span>
-          <button
-            onClick={() => fetchMovies(page + 1, activeCategory)}
-            disabled={page >= totalPages || loading}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 6,
-              border: "1px solid #45475a",
-              background: page >= totalPages ? "#1e1e2e" : "#313244",
-              color: page >= totalPages ? "#585b70" : "#cdd6f4",
-              cursor: page >= totalPages ? "default" : "pointer",
-              fontSize: 13,
-            }}
-          >
-            {">"}
-          </button>
+          {[{ name: "All", slug: "" }, ...categories].map((cat) => {
+            const active = activeCategory === cat.slug;
+            return (
+              <button
+                key={cat.slug}
+                style={{
+                  padding: "6px 16px",
+                  borderRadius: 20,
+                  border: active ? "1px solid var(--text-primary)" : "1px solid var(--text-muted)",
+                  background: active ? "var(--text-primary)" : "transparent",
+                  color: active ? "var(--bg-base)" : "var(--text-primary)",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "all 0.15s",
+                }}
+                onClick={() => handleCategoryClick(cat.slug)}
+              >
+                {cat.name}
+              </button>
+            );
+          })}
         </div>
-      )}
+
+        {/* Movie grid */}
+        <div className="movie-grid" style={{ padding: "0 24px 24px" }}>
+          {loading && (
+            <div style={{ gridColumn: "1 / -1", textAlign: "center", color: "var(--text-muted)", padding: 60, fontSize: 14 }}>
+              Loading...
+            </div>
+          )}
+          {!loading && movies.length === 0 && (
+            <div style={{ gridColumn: "1 / -1", textAlign: "center", color: "var(--text-muted)", padding: 60, fontSize: 14 }}>
+              No movies found
+            </div>
+          )}
+          {!loading &&
+            movies.map((movie) => (
+              <div
+                key={movie.url}
+                onClick={() => handleSelectMovieWithHistory(movie.url, movie.poster, movie.title)}
+                style={{
+                  cursor: "pointer",
+                  borderRadius: 4,
+                  overflow: "hidden",
+                  transition: "transform 0.2s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.05)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    aspectRatio: "2 / 3",
+                    position: "relative",
+                    background: "#2A2A2A",
+                    borderRadius: 4,
+                    overflow: "hidden",
+                  }}
+                >
+                  {movie.poster && (
+                    <img
+                      src={movie.poster}
+                      alt={movie.title}
+                      loading="lazy"
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                      }}
+                    />
+                  )}
+                  <div style={{ position: "absolute", top: 6, left: 6, display: "flex", gap: 4 }}>
+                    {movie.quality && (
+                      <span style={{
+                        background: "var(--accent)",
+                        color: "#fff",
+                        fontSize: 9,
+                        fontWeight: 700,
+                        padding: "2px 6px",
+                        borderRadius: 3,
+                        textTransform: "uppercase",
+                      }}>
+                        {movie.quality}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      padding: "32px 8px 8px",
+                      background: "linear-gradient(transparent, rgba(0,0,0,0.85))",
+                    }}
+                  >
+                    <div style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "#fff",
+                      lineHeight: 1.3,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                    }}>
+                      {movie.title}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
+                      {movie.rating && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#46D369" }}>{movie.rating}</span>
+                      )}
+                      {movie.language && (
+                        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.6)" }}>{movie.language}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 16,
+              padding: "10px 24px 20px",
+            }}
+          >
+            <NavBtn disabled={page <= 1 || loading} onClick={() => fetchMovies(page - 1, activeCategory)} dir="prev" />
+            <span style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600 }}>{page} / {totalPages}</span>
+            <NavBtn disabled={page >= totalPages || loading} onClick={() => fetchMovies(page + 1, activeCategory)} dir="next" />
+          </div>
+        )}
+      </div>
+
+      {/* Grid + scrollbar styling */}
+      <style>{`
+        div::-webkit-scrollbar { height: 0; width: 0; }
+        .movie-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(130px, 170px));
+          justify-content: start;
+          gap: 12px;
+        }
+        @media (max-width: 768px) {
+          .movie-grid {
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 6px !important;
+            padding-left: 6px !important;
+            padding-right: 6px !important;
+          }
+        }
+      `}</style>
     </div>
+  );
+}
+
+function menuItemStyle(disabled: boolean): React.CSSProperties {
+  return {
+    display: "flex", alignItems: "center", gap: 10, width: "100%",
+    padding: "10px 12px", border: "none", borderRadius: 6,
+    background: "transparent", color: disabled ? "var(--text-muted)" : "var(--text-primary)",
+    fontSize: 13, fontWeight: 500, cursor: disabled ? "default" : "pointer",
+    textAlign: "left" as const,
+  };
+}
+
+function NavBtn({ disabled, onClick, dir }: { disabled: boolean; onClick: () => void; dir: "prev" | "next" }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: "50%",
+        border: "1px solid var(--border)",
+        background: disabled ? "transparent" : "var(--bg-elevated)",
+        color: disabled ? "var(--text-muted)" : "var(--text-primary)",
+        cursor: disabled ? "default" : "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+        {dir === "prev" ? <polyline points="15,18 9,12 15,6" /> : <polyline points="9,6 15,12 9,18" />}
+      </svg>
+    </button>
   );
 }

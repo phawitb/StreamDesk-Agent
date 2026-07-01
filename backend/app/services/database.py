@@ -133,6 +133,21 @@ async def search_movies(query: str, limit: int = 20) -> list[dict]:
         await db.close()
 
 
+async def get_recent_movies(limit: int = 20) -> list[dict]:
+    """Get most recently cached movies."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT title, url, slug, poster, rating, quality, language "
+            "FROM movies ORDER BY cached_at DESC LIMIT ?",
+            (limit,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
 async def get_all_movies_summary(limit: int = 2000) -> list[dict]:
     """Get all movies with title, genres, rating, language, url for AI context."""
     db = await get_db()

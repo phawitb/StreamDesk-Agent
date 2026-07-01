@@ -169,6 +169,11 @@ class AgentManager:
 
     async def play(self, url: str):
         """Play a URL — route to YouTube, Bilibili, or site agent."""
+        # Stop current playback before starting new one
+        if monitor.connected and monitor.status.get("playing"):
+            logger.info("Stopping current playback before new request")
+            await monitor.pause()
+
         if YOUTUBE_RE.search(url):
             await self._play_youtube(url)
         elif BILIBILI_RE.search(url):
@@ -339,6 +344,7 @@ class AgentManager:
                     return
 
                 await monitor.open_url(m3u8_url, self._current_title)
+                await monitor.unmute()
                 await self._report("playing", f"กำลังเล่น: {self._current_title}")
             else:
                 await self._report("error", "ไม่พบ stream URL จากหน้าเว็บ")

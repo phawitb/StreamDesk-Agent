@@ -8,6 +8,7 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: -apple-system, sans-serif; }
 
+        /* ── Idle / Standby screen ── */
         #idle-screen {
             position: absolute; inset: 0;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -23,6 +24,40 @@
         .status-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #818cf8; animation: pulse 2s infinite; }
         @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
+        /* ── QR Standby screen ── */
+        #standby-screen {
+            position: absolute; inset: 0;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #0a0a1a 100%);
+            z-index: 6;
+        }
+        #standby-screen.active { display: flex; }
+        #standby-screen .standby-logo {
+            width: 100px; height: 100px; border-radius: 24px;
+            background: rgba(99,102,241,0.15);
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 32px;
+        }
+        #standby-screen .standby-logo svg { width: 52px; height: 52px; color: #818cf8; }
+        #standby-screen h1 { color: #e2e8f0; font-size: 36px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.5px; }
+        #standby-screen .subtitle { color: #64748b; font-size: 18px; margin-bottom: 48px; }
+        #qr-container {
+            background: #fff; border-radius: 20px; padding: 20px;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 60px rgba(99,102,241,0.15);
+        }
+        #qr-container canvas { display: block; }
+        #standby-url {
+            margin-top: 20px; color: #818cf8; font-size: 16px;
+            font-family: monospace; letter-spacing: 0.5px;
+        }
+        .scan-hint {
+            margin-top: 32px; color: #475569; font-size: 14px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .scan-hint svg { width: 18px; height: 18px; }
+
+        /* ── Media ── */
         #media-container { position: absolute; inset: 0; z-index: 10; }
         #media-container.hidden { display: none; }
         #video-player { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
@@ -38,8 +73,11 @@
         #volume-fill { position: absolute; bottom: 0; left: 0; right: 0; background: #818cf8; border-radius: 3px; transition: height 0.2s; }
         #volume-label { position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%); color: #e2e8f0; font-size: 14px; white-space: nowrap; }
     </style>
+    <!-- QR code library (lightweight, no deps) -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 </head>
 <body>
+    <!-- Idle screen (before WS connects) -->
     <div id="idle-screen">
         <div class="logo">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -51,6 +89,26 @@
         <div class="status-badge">
             <div class="dot"></div>
             <span id="connection-status">Connecting...</span>
+        </div>
+    </div>
+
+    <!-- Standby screen (logo + QR code, shown in inapp mode) -->
+    <div id="standby-screen">
+        <div class="standby-logo">
+            <svg fill="none" viewBox="0 0 24 24">
+                <rect x="2" y="3" width="20" height="18" rx="2" fill="#818cf8"/>
+                <path d="M10 8v8l6-4-6-4z" fill="#fff"/>
+            </svg>
+        </div>
+        <h1>StreamDesk</h1>
+        <div class="subtitle">Scan to control</div>
+        <div id="qr-container"></div>
+        <div id="standby-url"></div>
+        <div class="scan-hint">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+            </svg>
+            Use your phone to scan and control playback
         </div>
     </div>
 
@@ -73,21 +131,66 @@
         let currentMediaUrl = '';
         let currentMediaTitle = '';
 
-        let mode = 'none'; // 'none' | 'video' | 'embed'
+        let mediaMode = 'none'; // 'none' | 'video' | 'embed'
+        let monitorActive = true; // true = external active (play), false = inapp active (standby)
+        let wasPlayingBeforeStandby = false;
 
         const idleScreen = document.getElementById('idle-screen');
+        const standbyScreen = document.getElementById('standby-screen');
         const mediaContainer = document.getElementById('media-container');
         const videoPlayer = document.getElementById('video-player');
         const embedPlayer = document.getElementById('embed-player');
         const toast = document.getElementById('toast');
         const connStatus = document.getElementById('connection-status');
 
+        // Generate QR code on load
+        generateQR();
         connect();
+
+        function generateQR() {
+            // Build the frontend URL from the server's hostname
+            const host = location.hostname;
+            const frontendUrl = 'http://' + host + ':3000';
+
+            const qr = qrcode(0, 'M');
+            qr.addData(frontendUrl);
+            qr.make();
+
+            const container = document.getElementById('qr-container');
+            const canvas = document.createElement('canvas');
+            const cellSize = 6;
+            const moduleCount = qr.getModuleCount();
+            const size = moduleCount * cellSize;
+            canvas.width = size;
+            canvas.height = size;
+            canvas.style.width = (size * 2) + 'px';
+            canvas.style.height = (size * 2) + 'px';
+            canvas.style.imageRendering = 'pixelated';
+
+            const ctx = canvas.getContext('2d');
+            for (let row = 0; row < moduleCount; row++) {
+                for (let col = 0; col < moduleCount; col++) {
+                    ctx.fillStyle = qr.isDark(row, col) ? '#1a1a2e' : '#ffffff';
+                    ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+                }
+            }
+            container.innerHTML = '';
+            container.appendChild(canvas);
+
+            document.getElementById('standby-url').textContent = frontendUrl;
+        }
 
         function connect() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${location.host}/ws/monitor`);
-            ws.onopen = () => { connStatus.textContent = 'Connected'; };
+            ws.onopen = () => {
+                connStatus.textContent = 'Connected';
+                // Hide idle, decide standby vs media
+                idleScreen.classList.add('hidden');
+                if (!monitorActive && mediaMode === 'none') {
+                    showStandby();
+                }
+            };
             ws.onmessage = (e) => {
                 try { handleCommand(JSON.parse(e.data)); }
                 catch (err) { console.error('Bad msg:', err); }
@@ -99,6 +202,9 @@
         function handleCommand(cmd) {
             console.log('CMD:', cmd.action, cmd);
             switch (cmd.action) {
+                case 'SET_MODE':
+                    handleSetMode(cmd.mode);
+                    break;
                 case 'OPEN_URL':
                     currentMediaUrl = cmd.url || '';
                     currentMediaTitle = cmd.title || '';
@@ -113,6 +219,7 @@
                 case 'SEEK_TO':     doSeekTo(cmd.value || 0); break;
                 case 'VOLUME_UP':   doVolume(cmd.value || 10); break;
                 case 'VOLUME_DOWN': doVolume(-(cmd.value || 10)); break;
+                case 'SET_VOLUME':  doSetVolume(cmd.value ?? 50); break;
                 case 'MUTE':        doMute(true); break;
                 case 'UNMUTE':      doMute(false); break;
                 default:            if (cmd.message) showToast(cmd.message);
@@ -120,10 +227,37 @@
             reportStatus();
         }
 
+        function handleSetMode(newMode) {
+            if (newMode === 'out') {
+                // This monitor is now active — hide standby
+                // Backend will send OPEN_URL + SEEK_TO to resume
+                monitorActive = true;
+                hideStandby();
+            } else {
+                // This monitor is now inactive — show standby
+                // Backend already sent PAUSE before this
+                monitorActive = false;
+                cleanup();
+                mediaMode = 'none';
+                mediaContainer.classList.add('hidden');
+                showStandby();
+            }
+        }
+
+        function showStandby() {
+            idleScreen.classList.add('hidden');
+            standbyScreen.classList.add('active');
+        }
+
+        function hideStandby() {
+            standbyScreen.classList.remove('active');
+        }
+
         // ── Open media ──
 
         function openMedia(url, platform) {
             idleScreen.classList.add('hidden');
+            hideStandby();
             cleanup();
 
             if (platform === 'embed') {
@@ -136,7 +270,7 @@
         // ── Direct video (mp4, m3u8, local files) ──
 
         function openDirectVideo(url) {
-            mode = 'video';
+            mediaMode = 'video';
             mediaContainer.classList.remove('hidden');
             videoPlayer.classList.remove('hidden');
             embedPlayer.classList.add('hidden');
@@ -145,7 +279,6 @@
 
             videoPlayer.muted = isMuted;
             videoPlayer.play().then(() => {
-                // Enter fullscreen on the video element
                 if (!document.fullscreenElement) {
                     (videoPlayer.requestFullscreen || videoPlayer.webkitRequestFullscreen || function(){}).call(videoPlayer);
                 }
@@ -157,7 +290,7 @@
         // ── Embed player (iframe) ──
 
         function openEmbed(url) {
-            mode = 'embed';
+            mediaMode = 'embed';
             mediaContainer.classList.remove('hidden');
             videoPlayer.classList.add('hidden');
             embedPlayer.classList.remove('hidden');
@@ -177,49 +310,63 @@
         // ── Playback controls ──
 
         function doPlay() {
-            if (mode === 'video') {
+            if (mediaMode === 'video') {
                 videoPlayer.muted = isMuted;
                 videoPlayer.play().catch(() => {});
             }
         }
 
         function doPause() {
-            if (mode === 'video') videoPlayer.pause();
+            if (mediaMode === 'video') videoPlayer.pause();
         }
 
         function doStop() {
             cleanup();
             currentMediaUrl = '';
             currentMediaTitle = '';
-            mode = 'none';
+            mediaMode = 'none';
             videoPlayer.classList.add('hidden');
             mediaContainer.classList.add('hidden');
-            idleScreen.classList.remove('hidden');
+            if (monitorActive) {
+                idleScreen.classList.remove('hidden');
+            } else {
+                showStandby();
+            }
         }
 
         function doSeek(sec) {
-            if (mode === 'video') {
+            if (mediaMode === 'video') {
                 videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime + sec);
             }
         }
 
         function doSeekTo(val) {
-            if (mode === 'video' && videoPlayer.duration) {
+            if (mediaMode === 'video' && videoPlayer.duration) {
                 videoPlayer.currentTime = val;
             }
         }
 
         function doVolume(delta) {
             currentVolume = Math.max(0, Math.min(100, currentVolume + delta));
-            if (mode === 'video') {
+            if (mediaMode === 'video') {
                 videoPlayer.volume = currentVolume / 100;
+            }
+            showVolumeOverlay();
+        }
+
+        function doSetVolume(vol) {
+            currentVolume = Math.max(0, Math.min(100, vol));
+            if (mediaMode === 'video') {
+                videoPlayer.volume = currentVolume / 100;
+                videoPlayer.muted = currentVolume === 0;
+                isMuted = currentVolume === 0;
             }
             showVolumeOverlay();
         }
 
         function doMute(mute) {
             isMuted = mute;
-            if (mode === 'video') videoPlayer.muted = mute;
+            if (mediaMode === 'video') videoPlayer.muted = mute;
             showToast(mute ? 'Muted' : 'Unmuted');
         }
 
@@ -228,7 +375,7 @@
         function reportStatus() {
             if (!ws || ws.readyState !== WebSocket.OPEN) return;
             let playing = false, duration = 0, position = 0;
-            if (mode === 'video' && videoPlayer.src) {
+            if (mediaMode === 'video' && videoPlayer.src) {
                 playing = !videoPlayer.paused;
                 duration = videoPlayer.duration || 0;
                 position = videoPlayer.currentTime || 0;

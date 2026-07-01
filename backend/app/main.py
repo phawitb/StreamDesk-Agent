@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
 
 
 async def _start_monitor():
+    """Open the external monitor Chrome window after a brief delay."""
     await asyncio.sleep(2)
     try:
         await open_monitor()
