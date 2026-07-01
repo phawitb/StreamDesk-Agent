@@ -73,6 +73,12 @@ export default defineConfig({
       '/monitor': {
         target: 'http://localhost:8000',
       },
+      '/m': {
+        target: 'http://localhost:8000',
+      },
+      '/downloads': {
+        target: 'http://localhost:8000',
+      },
     },
   },
 })
