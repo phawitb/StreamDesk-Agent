@@ -248,9 +248,9 @@
             ws = new WebSocket(`${protocol}//${location.host}${wsPath}`);
             ws.onopen = () => {
                 connStatus.textContent = 'Connected';
-                // Hide idle, decide standby vs media
+                // Hide idle, show standby QR when no media is playing
                 idleScreen.classList.add('hidden');
-                if (!monitorActive && mediaMode === 'none') {
+                if (mediaMode === 'none') {
                     showStandby();
                 }
             };
@@ -415,11 +415,7 @@
             mediaMode = 'none';
             videoPlayer.classList.add('hidden');
             mediaContainer.classList.add('hidden');
-            if (monitorActive) {
-                idleScreen.classList.remove('hidden');
-            } else {
-                showStandby();
-            }
+            showStandby();
         }
 
         function doSeek(sec) {

@@ -331,24 +331,27 @@ async def websocket_endpoint(ws: WebSocket):
 
     agent_manager.set_episode_callback(episode_callback)
 
-    # Send initial status — restore current playback state if active
+    # Send initial status — restore current playback state if media is loaded
     status = ctrl.status
-    if status.get("playing") and status.get("title"):
+    if status.get("url"):
+        is_playing = status.get("playing", False)
+        title = status.get("title", "")
+        msg_text = f"กำลังเล่น: {title}" if is_playing else f"หยุดชั่วคราว: {title}"
         await ws.send_text(json.dumps(
             StatusMessage(
                 state=AgentState.PLAYING,
-                message=f"กำลังเล่น: {status['title']}",
-                title=status.get("title"),
+                message=msg_text,
+                title=title,
                 url=status.get("url"),
             ).model_dump(),
             ensure_ascii=False,
         ))
-        # Also send current media position so controls can resume
+        # Send current media position so controls can resume immediately
         await ws.send_text(json.dumps(
             {"type": "media_status", **_sanitize_floats({
                 "currentTime": status.get("position", 0),
                 "duration": status.get("duration", 0),
-                "paused": False,
+                "paused": not is_playing,
                 "volume": status.get("volume", 50),
                 "muted": status.get("muted", False),
             })},
