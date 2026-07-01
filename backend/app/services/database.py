@@ -46,6 +46,15 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS watch_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_email TEXT NOT NULL,
+                url TEXT NOT NULL,
+                title TEXT DEFAULT '',
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.commit()
         logger.info("Database initialized at %s", DB_PATH)
     finally:
@@ -244,5 +253,18 @@ async def get_movie_count() -> int:
         cursor = await db.execute("SELECT COUNT(*) FROM movies")
         row = await cursor.fetchone()
         return row[0]
+    finally:
+        await db.close()
+
+
+async def log_watch(user_email: str, url: str, title: str = ""):
+    """Log a user's watch event for analytics."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO watch_history (user_email, url, title) VALUES (?, ?, ?)",
+            (user_email, url, title),
+        )
+        await db.commit()
     finally:
         await db.close()

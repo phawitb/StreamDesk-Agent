@@ -17,7 +17,7 @@ function App() {
   const [monitorMode, setMonitorMode] = useState<"inapp" | "device" | "url">(() => {
     const stored = localStorage.getItem("monitorMode");
     if (stored === "inapp" || stored === "device" || stored === "url") return stored;
-    return "device"; // default (also handles old "outapp" value)
+    return "inapp"; // default
   });
   const [monitorFullscreen, setMonitorFullscreen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);

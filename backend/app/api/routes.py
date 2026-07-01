@@ -17,7 +17,7 @@ from app.services.agent_manager import agent_manager
 from app.services.monitor import monitor_manager
 from app.services.scraper import scrape_movies, scrape_categories, sync_all_movies
 from app.services.gemini_chat import recommend_movies
-from app.services.database import upsert_movies, get_user_by_id, get_user_by_monitor_token
+from app.services.database import upsert_movies, get_user_by_id, get_user_by_monitor_token, log_watch
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -436,6 +436,10 @@ async def websocket_endpoint(ws: WebSocket):
 
                 if url:
                     await broadcast(ChatMessage(content=f"รับคำสั่งแล้ว กำลังเปิด: {url}").model_dump(), user_id)
+                    # Log watch history
+                    user = await get_user_by_id(user_id)
+                    if user:
+                        asyncio.create_task(log_watch(user["email"], url))
                     asyncio.create_task(agent_manager.play(url))
                 elif query:
                     asyncio.create_task(_handle_recommendation(query, user_id))
