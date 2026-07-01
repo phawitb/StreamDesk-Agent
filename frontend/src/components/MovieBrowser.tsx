@@ -65,6 +65,7 @@ function formatTimeAgo(ts: number): string {
 }
 
 export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected }: Props) {
+  const isWide = typeof window !== "undefined" && window.innerWidth > 768;
   const [movies, setMovies] = useState<Movie[]>([]);
   const [recentMovies, setRecentMovies] = useState<Movie[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>(getHistory);
@@ -202,38 +203,65 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
               </svg>
             </button>
 
-            {/* Settings dropdown */}
+            {/* Settings panel — modal on desktop, dropdown on mobile */}
             {showSettings && (
               <>
-                <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setShowSettings(false)} />
                 <div style={{
+                  position: "fixed", inset: 0, zIndex: 99,
+                  background: window.innerWidth > 768 ? "rgba(0,0,0,0.6)" : "transparent",
+                }} onClick={() => setShowSettings(false)} />
+                <div style={window.innerWidth > 768 ? {
+                  position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+                  zIndex: 100, background: "var(--bg-elevated)", border: "1px solid var(--border)",
+                  borderRadius: 12, padding: 16, width: 400, maxWidth: "90vw",
+                  boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
+                } : {
                   position: "absolute", right: 0, top: 42, zIndex: 100,
                   background: "var(--bg-elevated)", border: "1px solid var(--border)",
                   borderRadius: 8, padding: 6, minWidth: 200,
                   boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
                 }}>
+                  {/* Title for desktop modal */}
+                  {isWide && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                      <h3 style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>Settings</h3>
+                      <button
+                        onClick={() => setShowSettings(false)}
+                        style={{
+                          width: 32, height: 32, borderRadius: "50%", border: "none",
+                          background: "rgba(255,255,255,0.08)", color: "var(--text-secondary)",
+                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+
                   <button
                     onClick={handleSync}
                     disabled={syncing}
-                    style={menuItemStyle(syncing)}
+                    style={menuItemStyle(syncing, isWide)}
                     onMouseEnter={(e) => !syncing && (e.currentTarget.style.background = "var(--bg-highlight)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16, flexShrink: 0 }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: isWide ? 20 : 16, height: isWide ? 20 : 16, flexShrink: 0 }}>
                       <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
                       <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
                     </svg>
                     {syncing ? "Syncing..." : "Sync Movies"}
                   </button>
 
-                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+                  <div style={{ height: 1, background: "var(--border)", margin: isWide ? "8px 0" : "4px 0" }} />
 
                   {/* Monitor mode */}
-                  <div style={{ padding: "8px 12px" }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
+                  <div style={{ padding: isWide ? "12px 4px" : "8px 12px" }}>
+                    <div style={{ fontSize: isWide ? 14 : 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 10 : 6 }}>
                       Monitor Mode
                     </div>
-                    <div style={{ display: "flex", gap: 4 }}>
+                    <div style={{ display: "flex", gap: isWide ? 6 : 4 }}>
                       {(["inapp", "device", "url"] as const).map((mode) => {
                         const labels = { inapp: "In-App", device: "\u03BB-Device", url: "URL" };
                         const active = monitorMode === mode;
@@ -242,10 +270,10 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                             key={mode}
                             onClick={() => onMonitorModeChange?.(mode)}
                             style={{
-                              flex: 1, padding: "7px 0", borderRadius: 6, border: "none",
+                              flex: 1, padding: isWide ? "10px 0" : "7px 0", borderRadius: 6, border: "none",
                               background: active ? "var(--accent)" : "rgba(255,255,255,0.08)",
                               color: active ? "#fff" : "var(--text-secondary)",
-                              fontSize: 11, fontWeight: 600, cursor: "pointer",
+                              fontSize: isWide ? 14 : 11, fontWeight: 600, cursor: "pointer",
                             }}
                           >
                             {labels[mode]}
@@ -253,7 +281,7 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                         );
                       })}
                     </div>
-                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
+                    <div style={{ fontSize: isWide ? 12 : 10, color: "var(--text-muted)", marginTop: isWide ? 8 : 4 }}>
                       {monitorMode === "inapp" && "ดูในแอป — แท็บ Monitor"}
                       {monitorMode === "device" && "เชื่อมต่อจอ Monitor ด้วย Device Key"}
                       {monitorMode === "url" && "เปิด URL บนจอใดก็ได้"}
@@ -261,17 +289,17 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
 
                     {/* λ-Device mode: device key + QR scan */}
                     {monitorMode === "device" && (
-                      <div style={{ marginTop: 8 }}>
+                      <div style={{ marginTop: isWide ? 14 : 8 }}>
                         {pairedDeviceKey ? (
                           <div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                            <div style={{ fontSize: isWide ? 13 : 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
                               Paired Device
                             </div>
-                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
                               <div style={{
-                                flex: 1, padding: "6px 8px", borderRadius: 4,
+                                flex: 1, padding: isWide ? "8px 12px" : "6px 8px", borderRadius: 4,
                                 border: "1px solid var(--border)", background: "var(--bg-base)",
-                                color: "var(--text-primary)", fontSize: 11,
+                                color: "var(--text-primary)", fontSize: isWide ? 14 : 11,
                                 fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis",
                               }}>
                                 {pairedDeviceKey}
@@ -279,9 +307,9 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                               <button
                                 onClick={() => onUnpairDevice?.()}
                                 style={{
-                                  padding: "6px 10px", borderRadius: 4, border: "none",
+                                  padding: isWide ? "8px 16px" : "6px 10px", borderRadius: 4, border: "none",
                                   background: "var(--accent)", color: "#fff",
-                                  fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                  fontSize: isWide ? 13 : 11, fontWeight: 600, cursor: "pointer",
                                   whiteSpace: "nowrap", flexShrink: 0,
                                 }}
                               >
@@ -291,18 +319,18 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                           </div>
                         ) : (
                           <div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                            <div style={{ fontSize: isWide ? 13 : 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
                               Device Key
                             </div>
-                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
                               <input
                                 value={deviceKeyInput}
                                 onChange={(e) => setDeviceKeyInput(e.target.value)}
                                 placeholder="Enter device key..."
                                 style={{
-                                  flex: 1, padding: "6px 8px", borderRadius: 4,
+                                  flex: 1, padding: isWide ? "8px 12px" : "6px 8px", borderRadius: 4,
                                   border: "1px solid var(--border)", background: "var(--bg-base)",
-                                  color: "var(--text-primary)", fontSize: 11, outline: "none",
+                                  color: "var(--text-primary)", fontSize: isWide ? 14 : 11, outline: "none",
                                   minWidth: 0,
                                 }}
                                 onKeyDown={(e) => e.key === "Enter" && handlePair()}
@@ -311,9 +339,9 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                                 onClick={handlePair}
                                 disabled={!deviceKeyInput.trim() || pairing}
                                 style={{
-                                  padding: "6px 10px", borderRadius: 4, border: "none",
+                                  padding: isWide ? "8px 16px" : "6px 10px", borderRadius: 4, border: "none",
                                   background: deviceKeyInput.trim() ? "var(--accent)" : "rgba(255,255,255,0.08)",
-                                  color: "#fff", fontSize: 11, fontWeight: 600,
+                                  color: "#fff", fontSize: isWide ? 13 : 11, fontWeight: 600,
                                   cursor: deviceKeyInput.trim() ? "pointer" : "default",
                                   whiteSpace: "nowrap", flexShrink: 0,
                                 }}
@@ -324,14 +352,14 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                             <button
                               onClick={() => setShowQRScanner(true)}
                               style={{
-                                width: "100%", marginTop: 6, padding: "7px 0",
+                                width: "100%", marginTop: isWide ? 10 : 6, padding: isWide ? "10px 0" : "7px 0",
                                 borderRadius: 4, border: "1px solid var(--border)",
                                 background: "transparent", color: "var(--text-secondary)",
-                                fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                fontSize: isWide ? 13 : 11, fontWeight: 600, cursor: "pointer",
                                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                               }}
                             >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: isWide ? 18 : 14, height: isWide ? 18 : 14 }}>
                                 <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
                                 <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
                               </svg>
@@ -344,18 +372,18 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
 
                     {/* URL mode: show monitor URL */}
                     {monitorMode === "url" && monitorToken && (
-                      <div style={{ marginTop: 8 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                      <div style={{ marginTop: isWide ? 14 : 8 }}>
+                        <div style={{ fontSize: isWide ? 13 : 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
                           Monitor URL
                         </div>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
                           <input
                             readOnly
                             value={`${window.location.origin}/m/${monitorToken}`}
                             style={{
-                              flex: 1, padding: "6px 8px", borderRadius: 4,
+                              flex: 1, padding: isWide ? "8px 12px" : "6px 8px", borderRadius: 4,
                               border: "1px solid var(--border)", background: "var(--bg-base)",
-                              color: "var(--text-primary)", fontSize: 11, outline: "none",
+                              color: "var(--text-primary)", fontSize: isWide ? 14 : 11, outline: "none",
                               minWidth: 0,
                             }}
                             onClick={(e) => (e.target as HTMLInputElement).select()}
@@ -368,16 +396,16 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                               });
                             }}
                             style={{
-                              padding: "6px 10px", borderRadius: 4, border: "none",
+                              padding: isWide ? "8px 16px" : "6px 10px", borderRadius: 4, border: "none",
                               background: copied ? "#46D369" : "var(--accent)",
-                              color: "#fff", fontSize: 11, fontWeight: 600,
+                              color: "#fff", fontSize: isWide ? 13 : 11, fontWeight: 600,
                               cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
                             }}
                           >
                             {copied ? "Copied!" : "Copy"}
                           </button>
                         </div>
-                        <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
+                        <div style={{ fontSize: isWide ? 12 : 10, color: "var(--text-muted)", marginTop: isWide ? 6 : 4 }}>
                           เปิด URL นี้บนจอ Monitor ใดก็ได้
                         </div>
                       </div>
@@ -708,12 +736,12 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
   );
 }
 
-function menuItemStyle(disabled: boolean): React.CSSProperties {
+function menuItemStyle(disabled: boolean, wide = false): React.CSSProperties {
   return {
-    display: "flex", alignItems: "center", gap: 10, width: "100%",
-    padding: "10px 12px", border: "none", borderRadius: 6,
+    display: "flex", alignItems: "center", gap: wide ? 12 : 10, width: "100%",
+    padding: wide ? "12px 8px" : "10px 12px", border: "none", borderRadius: 6,
     background: "transparent", color: disabled ? "var(--text-muted)" : "var(--text-primary)",
-    fontSize: 13, fontWeight: 500, cursor: disabled ? "default" : "pointer",
+    fontSize: wide ? 15 : 13, fontWeight: 500, cursor: disabled ? "default" : "pointer",
     textAlign: "left" as const,
   };
 }
