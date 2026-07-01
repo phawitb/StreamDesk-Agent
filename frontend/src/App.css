@@ -12,53 +12,57 @@
   min-height: 0;
 }
 
+/* ── Sidebar (hidden on mobile, hidden on desktop too — replaced by bottom nav) ── */
+.sidebar {
+  display: none;
+}
+
 /* ── Main Content ── */
 .main-content {
   flex: 1;
   display: flex;
-  flex-direction: column;
   min-width: 0;
-  min-height: 0;
   overflow: hidden;
 }
 
-/* ── Panels (mobile default: tab-switched) ── */
-.panel-browse,
-.panel-chat,
-.panel-monitor {
+.panel-browse {
   flex: 1;
   min-width: 0;
-  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .panel-chat {
+  width: 360px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  min-height: 0;
 }
 
 .panel-monitor {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: #000;
-}
-
-.panel-browse.hidden-mobile,
-.panel-chat.hidden-mobile,
-.panel-monitor.hidden-mobile {
-  display: none;
 }
 
 /* ── Now Playing Bar ── */
 .now-playing-bar {
   flex-shrink: 0;
-  height: 56px;
+  min-height: var(--now-playing-height);
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
 }
 
-/* ── Bottom Nav (mobile) ── */
+/* ── Bottom Nav ── */
 .bottom-nav {
-  display: flex;
+  display: none;
   flex-shrink: 0;
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
@@ -110,34 +114,59 @@
 }
 
 /* ══════════════════════════════════════
-   Desktop: two-column layout
-   Left = Browse (3/4), Right = Monitor + Chat (1/4)
+   Mobile (≤768px): tab-based, bottom nav
    ══════════════════════════════════════ */
-@media (min-width: 769px) {
-  /* Hide mobile bottom nav */
+@media (max-width: 768px) {
   .bottom-nav {
+    display: flex;
+  }
+
+  .panel-chat {
+    width: 100%;
+    flex: 1;
+    border-left: none;
+    min-height: 0;
+  }
+
+  .panel-browse {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .main-content {
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .panel-browse.hidden-mobile,
+  .panel-chat.hidden-mobile,
+  .panel-monitor.hidden-mobile {
     display: none;
   }
 
-  /* No tab hiding on desktop — all panels always visible */
+  .panel-monitor {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .now-playing-bar {
+    height: 56px;
+  }
+}
+
+/* ══════════════════════════════════════
+   Desktop (>768px): two-column layout
+   Left = Browse, Right = Monitor + Chat
+   ══════════════════════════════════════ */
+@media (min-width: 769px) {
+  /* All panels always visible on desktop */
   .panel-browse.hidden-mobile,
   .panel-chat.hidden-mobile,
   .panel-monitor.hidden-mobile {
     display: flex;
   }
 
-  .main-content {
-    flex-direction: row;
-  }
-
-  /* Left column: Browse */
-  .panel-browse {
-    flex: 1;
-    min-width: 0;
-    overflow-y: auto;
-  }
-
-  /* Right column wrapper (set inline via JS) */
+  /* Right column wrapper */
   .desktop-right {
     display: flex;
     flex-direction: column;
@@ -148,7 +177,7 @@
     overflow: hidden;
   }
 
-  /* Monitor mini player */
+  /* Monitor mini player inside right column */
   .desktop-right .panel-monitor {
     flex: none;
     height: 200px;
@@ -159,6 +188,7 @@
   .desktop-right .panel-chat {
     flex: 1;
     min-height: 0;
+    width: 100%;
     border-left: none;
   }
 
