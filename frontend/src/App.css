@@ -138,9 +138,7 @@
     min-height: 0;
   }
 
-  .panel-browse.hidden-mobile,
-  .panel-chat.hidden-mobile,
-  .panel-monitor.hidden-mobile {
+  .hidden-mobile {
     display: none;
   }
 
