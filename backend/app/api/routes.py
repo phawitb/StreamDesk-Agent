@@ -174,6 +174,9 @@ async def update_settings(request: Request, body: dict):
         mode = "in" if body["monitor_mode"] == "inapp" else "out"
         await ctrl.set_active_mode(mode)
         logger.info("Monitor mode set to %s for user %d", mode, user_id)
+        # Notify frontend to reset playback state
+        msg = StatusMessage(state=AgentState.IDLE, message="เปลี่ยนจอแล้ว รอคำสั่งใหม่")
+        await broadcast(msg.model_dump(), user_id)
     return {"ok": True}
 
 

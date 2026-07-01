@@ -16,7 +16,7 @@ DOWNLOADS_DIR = Path(__file__).parent.parent.parent / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
 YOUTUBE_RE = re.compile(r'(youtube\.com|youtu\.be)')
-BILIBILI_RE = re.compile(r'(bilibili\.com|bilibili\.tv|b23\.tv)')
+BILIBILI_RE = re.compile(r'(bilibili\.com|bilibili\.tv|b23\.tv|bili\.im)')
 
 # Import site agents to trigger registration
 import app.agents.sites.hd24  # noqa: F401

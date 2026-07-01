@@ -46,25 +46,21 @@ class MonitorController:
         self._active_mode = mode
         logger.info("Monitor switch: %s → %s", old_mode, mode)
 
-        url = self._status.get("url", "")
-        title = self._status.get("title", "")
-        position = self._status.get("position", 0.0)
-        volume = self._status.get("volume", 50)
-        was_playing = self._status.get("playing", False)
+        # Stop playback on old monitor
+        await self._send_to(old_mode, {"action": "STOP"})
 
-        await self._send_to(old_mode, {"action": "PAUSE"})
-        if old_mode == "out":
+        # Update external monitor standby state
+        if mode == "in":
             await self._send_to("out", {"action": "SET_MODE", "mode": "in"})
         else:
             await self._send_to("out", {"action": "SET_MODE", "mode": "out"})
 
-        if url:
-            await self._send_to(mode, {"action": "OPEN_URL", "url": url, "title": title})
-            await self._send_to(mode, {"action": "SET_VOLUME", "value": volume})
-            if position > 1:
-                await self._send_to(mode, {"action": "SEEK_TO", "value": position})
-            if not was_playing:
-                await self._send_to(mode, {"action": "PAUSE"})
+        # Reset status — wait for new command
+        self._status["playing"] = False
+        self._status["title"] = ""
+        self._status["url"] = ""
+        self._status["duration"] = 0.0
+        self._status["position"] = 0.0
 
     async def register(self, ws: WebSocket, mode: str = "out") -> None:
         self._monitors[mode] = ws

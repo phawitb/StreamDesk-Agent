@@ -150,6 +150,13 @@ function App() {
       }
       send({ type: "play_request", ...(isUrl ? { url: text } : { query: text }) });
       messages.push({ type: "chat", role: "user", content: text });
+      // Extract YouTube/Bilibili thumbnail
+      if (isUrl) {
+        const ytMatch = text.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
+        if (ytMatch) {
+          setCurrentPoster(`https://img.youtube.com/vi/${ytMatch[1]}/mqdefault.jpg`);
+        }
+      }
       setActiveTab("chat");
     },
     [send, messages, isExternalDisconnected]
@@ -176,6 +183,13 @@ function App() {
 
   const isPlaying = currentState === "playing";
   const showMonitorTab = monitorMode === "inapp";
+
+  // Reset poster when state goes idle
+  useEffect(() => {
+    if (currentState === "idle") {
+      setCurrentPoster("");
+    }
+  }, [currentState]);
 
   // Auth loading
   if (authLoading) {
@@ -282,7 +296,7 @@ function App() {
       </div>
 
       <div className="now-playing-bar">
-        <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} />
+        <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} />
       </div>
 
       <nav className="bottom-nav">

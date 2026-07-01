@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { AgentState } from "../types/messages";
 
 interface Props {
   onMediaControl: (action: string, value?: number) => void;
   title?: string;
   poster?: string;
   isPlaying?: boolean;
+  monitorMode?: "inapp" | "outapp";
+  currentState?: AgentState;
 }
 
 interface MediaStatus {
@@ -24,14 +27,18 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function MediaControls({ onMediaControl, title, poster, isPlaying }: Props) {
+const WAITING_STATES = new Set<string>(["launching", "navigating", "loading_player"]);
+
+export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "outapp", currentState = "idle" }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: false, volume: 50, muted: false });
   const [dragging, setDragging] = useState(false);
   const [dragTime, setDragTime] = useState(0);
-  const [showVolume, setShowVolume] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
   const titleRef = useRef<HTMLDivElement>(null);
   const [needsMarquee, setNeedsMarquee] = useState(false);
+
+  const isWaiting = WAITING_STATES.has(currentState);
+  const active = !!isPlaying;
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -52,11 +59,9 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying }: Prop
     return () => window.removeEventListener("media_status" as any, handler as any);
   }, []);
 
-  // Check if title overflows and needs marquee
   useEffect(() => {
     const el = titleRef.current;
     if (!el) return;
-    // Temporarily remove overflow to measure true scrollWidth
     const prev = el.style.overflow;
     el.style.overflow = "visible";
     const overflows = el.scrollWidth > el.clientWidth;
@@ -74,20 +79,32 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying }: Prop
     setDragging(false);
   }, [onMediaControl, dragTime]);
 
-  const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const vol = parseInt(e.target.value);
-    // We need a way to set volume — use volume_up/down relative, or add set_volume
-    // For now, mute/unmute based on 0 threshold, and use the value
-    onMediaControl("set_volume", vol);
-  }, [onMediaControl]);
-
   const progress = status.duration > 0 ? ((dragging ? dragTime : status.currentTime) / status.duration) * 100 : 0;
-  const active = !!isPlaying;
-  const volumePercent = status.muted ? 0 : status.volume;
+
+  // Display text logic
+  let displayText: React.ReactNode;
+  if (active) {
+    if (needsMarquee) {
+      displayText = (
+        <span className="np-marquee-track">
+          <span>{title}</span>
+          <span aria-hidden="true">{title}</span>
+        </span>
+      );
+    } else {
+      displayText = title || "Now Playing";
+    }
+  } else if (isWaiting) {
+    displayText = <span className="np-waiting">Waiting...</span>;
+  } else {
+    displayText = "Not Playing";
+  }
+
+  const controlsActive = active || isWaiting;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      {/* Progress bar at top of the bar */}
+      {/* Progress bar */}
       <div style={{ height: 3, background: "rgba(255,255,255,0.08)", flexShrink: 0, position: "relative" }}>
         <div style={{
           width: `${progress}%`,
@@ -137,17 +154,10 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying }: Prop
             ref={titleRef}
             style={{
               fontSize: 13, fontWeight: 600, overflow: "hidden", whiteSpace: "nowrap",
-              color: active ? "var(--text-primary)" : "var(--text-muted)",
+              color: (active || isWaiting) ? "var(--text-primary)" : "var(--text-muted)",
             }}
           >
-            {needsMarquee && active ? (
-              <span className="np-marquee-track">
-                <span>{title}</span>
-                <span aria-hidden="true">{title}</span>
-              </span>
-            ) : (
-              active ? (title || "Now Playing") : "Not Playing"
-            )}
+            {displayText}
           </div>
           {active && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums", marginTop: 1 }}>
@@ -157,11 +167,12 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying }: Prop
         </div>
 
         {/* Controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: 0, flexShrink: 0 }}>
-          {/* Backward 10s */}
+        <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+          {/* Backward |< */}
           <button onClick={() => active && onMediaControl("seek_backward", 10)} disabled={!active} style={controlBtn(active)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-              <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 105.64-8.36L1 10" />
+            <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
+              <rect x="4" y="5" width="2.5" height="14" rx="0.5" />
+              <path d="M20 5l-12 7 12 7V5z" />
             </svg>
           </button>
 
@@ -183,83 +194,46 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying }: Prop
             )}
           </button>
 
-          {/* Forward 10s */}
+          {/* Forward >| */}
           <button onClick={() => active && onMediaControl("seek_forward", 10)} disabled={!active} style={controlBtn(active)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-              <path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-5.64-8.36L23 10" />
+            <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
+              <path d="M4 5l12 7-12 7V5z" />
+              <rect x="17.5" y="5" width="2.5" height="14" rx="0.5" />
             </svg>
           </button>
 
-          {/* Volume button — toggles volume slider */}
-          <button
-            onClick={() => {
-              if (!active) return;
-              setShowVolume(!showVolume);
-            }}
-            disabled={!active}
-            style={controlBtn(active)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-              {status.muted || volumePercent === 0 ? (
-                <><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>
-              ) : volumePercent < 50 ? (
-                <><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" /><path d="M15.54 8.46a5 5 0 010 7.07" /></>
-              ) : (
-                <><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" /><path d="M15.54 8.46a5 5 0 010 7.07" /><path d="M19.07 4.93a10 10 0 010 14.14" /></>
-              )}
-            </svg>
-          </button>
+          {/* Volume remote — external monitor only */}
+          {monitorMode === "outapp" && controlsActive && (
+            <>
+              <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
+              <button
+                onClick={() => active && onMediaControl("volume_down", 10)}
+                disabled={!active}
+                style={controlBtn(active)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                  {status.volume <= 0 || status.muted ? (
+                    <><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>
+                  ) : (
+                    <><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" /><line x1="23" y1="12" x2="17" y2="12" /></>
+                  )}
+                </svg>
+              </button>
+              <button
+                onClick={() => active && onMediaControl("volume_up", 10)}
+                disabled={!active}
+                style={controlBtn(active)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                  <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
+                  <line x1="17" y1="12" x2="23" y2="12" />
+                  <line x1="20" y1="9" x2="20" y2="15" />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
       </div>
-
-      {/* Volume slider row — slides down when toggled */}
-      {showVolume && active && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 10,
-          padding: "0 16px 6px", flexShrink: 0,
-        }}>
-          <button
-            onClick={() => onMediaControl(status.muted ? "unmute" : "mute")}
-            style={{
-              border: "none", background: "transparent", padding: 0,
-              color: status.muted ? "var(--accent)" : "var(--text-muted)",
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-              width: 20, height: 20,
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
-              {status.muted ? (
-                <><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>
-              ) : (
-                <><polygon points="11,5 6,9 2,9 2,15 6,15 11,19" /><path d="M15.54 8.46a5 5 0 010 7.07" /></>
-              )}
-            </svg>
-          </button>
-          <div style={{ flex: 1, position: "relative", height: 20, display: "flex", alignItems: "center" }}>
-            <div style={{
-              position: "absolute", left: 0, right: 0, height: 3,
-              background: "rgba(255,255,255,0.1)", borderRadius: 2,
-            }}>
-              <div style={{
-                width: `${volumePercent}%`, height: "100%",
-                background: "var(--text-primary)", borderRadius: 2,
-              }} />
-            </div>
-            <input
-              type="range" min={0} max={100} step={1}
-              value={volumePercent}
-              onChange={handleVolumeChange}
-              style={{
-                width: "100%", position: "relative", zIndex: 1,
-                opacity: 0, cursor: "pointer", height: 20, margin: 0,
-              }}
-            />
-          </div>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 28, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-            {Math.round(volumePercent)}%
-          </span>
-        </div>
-      )}
 
       <style>{`
         .np-marquee-track {
@@ -273,6 +247,13 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying }: Prop
         @keyframes npMarquee {
           0% { transform: translateX(0); }
           100% { transform: translateX(-50%); }
+        }
+        .np-waiting {
+          animation: npBlink 1.2s ease-in-out infinite;
+        }
+        @keyframes npBlink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
         }
       `}</style>
     </div>
