@@ -46,8 +46,9 @@ class MonitorController:
         self._active_mode = mode
         logger.info("Monitor switch: %s → %s", old_mode, mode)
 
-        # Stop playback on old monitor
-        await self._send_to(old_mode, {"action": "STOP"})
+        # Pause old monitor (don't stop — keep video loaded)
+        was_playing = self._status.get("playing", False)
+        await self._send_to(old_mode, {"action": "PAUSE"})
 
         # Update external monitor standby state
         if mode == "in":
@@ -55,12 +56,20 @@ class MonitorController:
         else:
             await self._send_to("out", {"action": "SET_MODE", "mode": "out"})
 
-        # Reset status — wait for new command
-        self._status["playing"] = False
-        self._status["title"] = ""
-        self._status["url"] = ""
-        self._status["duration"] = 0.0
-        self._status["position"] = 0.0
+        # Resume on new monitor if media was loaded
+        if self._status.get("url"):
+            await self._send_to(mode, {
+                "action": "OPEN_URL",
+                "url": self._status["url"],
+                "title": self._status.get("title", ""),
+            })
+            if self._status.get("position", 0) > 0:
+                await self._send_to(mode, {
+                    "action": "SEEK_TO",
+                    "value": self._status["position"],
+                })
+            if not was_playing:
+                await self._send_to(mode, {"action": "PAUSE"})
 
     async def register(self, ws: WebSocket, mode: str = "out") -> None:
         self._monitors[mode] = ws
