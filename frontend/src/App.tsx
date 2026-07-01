@@ -71,6 +71,8 @@ function App() {
     }
   }, [setPairedDevice]);
 
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
   // Detect landscape orientation
   useEffect(() => {
     const checkOrientation = () => {
@@ -80,6 +82,18 @@ function App() {
     checkOrientation();
     window.addEventListener("resize", checkOrientation);
     return () => window.removeEventListener("resize", checkOrientation);
+  }, []);
+
+  // Detect virtual keyboard (mobile)
+  useEffect(() => {
+    if (!("visualViewport" in window)) return;
+    const vv = window.visualViewport!;
+    const onResize = () => {
+      const ratio = vv.height / window.innerHeight;
+      setKeyboardVisible(ratio < 0.75);
+    };
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
   }, []);
 
   const monitorIsFullscreen = activeTab === "monitor" && (isLandscape || monitorFullscreen);
@@ -222,6 +236,7 @@ function App() {
 
   const isPlaying = currentState === "playing";
   const showMonitorTab = monitorMode === "inapp";
+  const isAdmin = user?.email === "phawit.boo@gmail.com";
 
   // Reset poster when state goes idle
   useEffect(() => {
@@ -310,7 +325,7 @@ function App() {
               messages={displayMessages}
               onSend={handleSend}
               isPlaying={isPlaying}
-              onDownload={() => send({ type: "command", action: "download" })}
+              onDownload={isAdmin ? () => send({ type: "command", action: "download" }) : undefined}
               episodes={episodes}
               onSelectEpisode={handleSelectEpisode}
               onSelectMovie={handleSelectMovie}
@@ -337,11 +352,13 @@ function App() {
         </div>
       </div>
 
-      <div className="now-playing-bar">
-        <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} />
-      </div>
+      {!keyboardVisible && (
+        <div className="now-playing-bar">
+          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} />
+        </div>
+      )}
 
-      <nav className="bottom-nav">
+      {!keyboardVisible && <nav className="bottom-nav">
         <button className={`bottom-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
           Browse
@@ -356,7 +373,7 @@ function App() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
           Chat
         </button>
-      </nav>
+      </nav>}
     </div>
   );
 }
