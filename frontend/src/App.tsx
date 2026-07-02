@@ -335,6 +335,8 @@ function App() {
       onUnpairDevice={handleUnpairDevice}
       monitorToken={monitorToken}
       isExternalDisconnected={isExternalDisconnected}
+      user={user}
+      onLogout={logout}
     />
   );
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { QRScanner } from "./QRScanner";
 import type { Movie, MoviesResponse } from "../types/movie";
 import type { AgentState } from "../types/messages";
+import type { User } from "../hooks/useAuth";
 
 interface Category {
   name: string;
@@ -26,6 +27,8 @@ interface Props {
   onUnpairDevice?: () => void;
   monitorToken?: string | null;
   isExternalDisconnected?: boolean;
+  user?: User | null;
+  onLogout?: () => void;
 }
 
 const HISTORY_KEY = "streamdesk_history";
@@ -64,7 +67,7 @@ function formatTimeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
-export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected }: Props) {
+export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected, user, onLogout }: Props) {
   const isWide = typeof window !== "undefined" && window.innerWidth > 768;
   const [movies, setMovies] = useState<Movie[]>([]);
   const [recentMovies, setRecentMovies] = useState<Movie[]>([]);
@@ -410,6 +413,41 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                       )}
                     </div>
                   </div>
+
+                  {/* Profile + Logout */}
+                  {user && (
+                    <>
+                      <div style={{ height: 1, background: "var(--border)", margin: isWide ? "8px 0" : "4px 0" }} />
+                      <div style={{ display: "flex", alignItems: "center", gap: isWide ? 12 : 10, padding: isWide ? "12px 4px" : "10px 12px" }}>
+                        {user.picture && (
+                          <img src={user.picture} alt="" referrerPolicy="no-referrer" style={{
+                            width: isWide ? 40 : 36, height: isWide ? 40 : 36, borderRadius: "50%", flexShrink: 0,
+                          }} />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: isWide ? 14 : 13, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {user.name || user.email}
+                          </div>
+                          {user.name && (
+                            <div style={{ fontSize: isWide ? 12 : 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {user.email}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={onLogout}
+                          style={{
+                            padding: isWide ? "8px 16px" : "8px 14px", borderRadius: 6, border: "1px solid var(--border)",
+                            background: "transparent", color: "var(--text-secondary)",
+                            fontSize: isWide ? 13 : 12, fontWeight: 600, cursor: "pointer",
+                            whiteSpace: "nowrap", flexShrink: 0,
+                          }}
+                        >
+                          Logout
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             )}
