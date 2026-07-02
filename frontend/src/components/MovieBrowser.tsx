@@ -45,6 +45,16 @@ interface WatchHistoryEntry {
   started_at: string;
 }
 
+interface PopularMovie {
+  url: string;
+  title: string;
+  viewer_count: number;
+  play_count: number;
+  last_watched: string;
+  downloaded: boolean;
+  downloading: boolean;
+}
+
 const HISTORY_KEY = "streamdesk_history";
 const MAX_HISTORY = 30;
 
@@ -67,6 +77,14 @@ function addToHistory(movie: { title?: string; url: string; poster?: string }) {
   if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   return history;
+}
+
+function getWatchProgress(): Record<string, { currentTime: number; duration: number }> {
+  try {
+    return JSON.parse(localStorage.getItem("streamdesk_progress") || "{}");
+  } catch {
+    return {};
+  }
 }
 
 function formatTimeAgo(ts: number): string {
@@ -98,13 +116,19 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
   const [pairing, setPairing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showWatchHistory, setShowWatchHistory] = useState(false);
+  const [watchHistoryTab, setWatchHistoryTab] = useState<"users" | "movies">("users");
   const [watchHistory, setWatchHistory] = useState<WatchHistoryEntry[]>([]);
   const [watchHistoryLoading, setWatchHistoryLoading] = useState(false);
+  const [popularMovies, setPopularMovies] = useState<PopularMovie[]>([]);
+  const [popularMoviesLoading, setPopularMoviesLoading] = useState(false);
+  const [autoDownloadThreshold, setAutoDownloadThreshold] = useState(0);
+  const [downloadingUrls, setDownloadingUrls] = useState<Set<string>>(new Set());
   const [showVideoStorage, setShowVideoStorage] = useState(false);
   const [videoList, setVideoList] = useState<{ filename: string; size: number; modified: number }[]>([]);
   const [videoTotalSize, setVideoTotalSize] = useState(0);
   const [videoMaxBytes, setVideoMaxBytes] = useState(10 * 1024 * 1024 * 1024);
   const [videoLoading, setVideoLoading] = useState(false);
+  const [watchProgress, setWatchProgress] = useState<Record<string, { currentTime: number; duration: number }>>(getWatchProgress);
   const recentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -112,6 +136,28 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
       .then((r) => r.json())
       .then((data: Category[]) => setCategories(data))
       .catch(() => {});
+  }, []);
+
+  // Refresh watch progress when tab becomes visible or media status updates
+  useEffect(() => {
+    const refresh = () => setWatchProgress(getWatchProgress());
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    // Throttled refresh on media_status events
+    let lastRefresh = 0;
+    const onMediaStatus = () => {
+      if (Date.now() - lastRefresh > 5000) {
+        lastRefresh = Date.now();
+        refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("media_status" as any, onMediaStatus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("media_status" as any, onMediaStatus);
+    };
   }, []);
 
   // Fetch recent movies
@@ -151,6 +197,7 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
     (url: string, poster?: string, title?: string) => {
       const updated = addToHistory({ title, url, poster });
       setHistory(updated);
+      setWatchProgress(getWatchProgress());
       onSelectMovie(url, poster);
     },
     [onSelectMovie]
@@ -187,6 +234,7 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
 
   const handleOpenWatchHistory = async () => {
     setShowWatchHistory(true);
+    setWatchHistoryTab("users");
     setWatchHistoryLoading(true);
     try {
       const resp = await fetch("/api/admin/watch-history?limit=200");
@@ -195,6 +243,50 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
       console.error("Failed to load watch history:", e);
     } finally {
       setWatchHistoryLoading(false);
+    }
+  };
+
+  const fetchPopularMovies = async () => {
+    setPopularMoviesLoading(true);
+    try {
+      const resp = await fetch("/api/admin/popular-movies");
+      if (resp.ok) {
+        const data = await resp.json();
+        setPopularMovies(data.movies);
+        setAutoDownloadThreshold(data.auto_download_threshold);
+      }
+    } catch (e) {
+      console.error("Failed to load popular movies:", e);
+    } finally {
+      setPopularMoviesLoading(false);
+    }
+  };
+
+  const handleDownloadMovie = async (url: string) => {
+    setDownloadingUrls((prev) => new Set(prev).add(url));
+    try {
+      await fetch("/api/admin/download-movie", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+    } catch (e) {
+      console.error("Download failed:", e);
+    }
+  };
+
+  const handleSaveAutoDownload = async (value: number) => {
+    setAutoDownloadThreshold(value);
+    try {
+      await fetch("/api/app-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auto_download_threshold: value }),
+      });
+      // Refresh after a short delay to show new download statuses
+      setTimeout(fetchPopularMovies, 1500);
+    } catch (e) {
+      console.error("Failed to save auto-download threshold:", e);
     }
   };
 
@@ -684,6 +776,20 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                     }}>
                       {formatTimeAgo(item.timestamp)}
                     </span>
+                    {/* Watch progress bar */}
+                    {watchProgress[item.url] && watchProgress[item.url].duration > 0 && (
+                      <div style={{
+                        position: "absolute", bottom: 0, left: 0, right: 0, height: 3,
+                        background: "rgba(0,0,0,0.5)",
+                      }}>
+                        <div style={{
+                          width: `${Math.min(100, (watchProgress[item.url].currentTime / watchProgress[item.url].duration) * 100)}%`,
+                          height: "100%",
+                          background: "var(--accent, #e50914)",
+                          borderRadius: "0 1px 1px 0",
+                        }} />
+                      </div>
+                    )}
                   </div>
                   <div style={{
                     fontSize: 11, fontWeight: 600, color: "var(--text-primary)",
@@ -941,63 +1047,208 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
             maxHeight: "85vh", display: "flex", flexDirection: "column",
             boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
           }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isWide ? 16 : 12, flexShrink: 0 }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexShrink: 0 }}>
               <h3 style={{ fontSize: isWide ? 20 : 17, fontWeight: 700, color: "var(--text-primary)" }}>Watch History</h3>
-              <button
-                onClick={() => setShowWatchHistory(false)}
-                style={{
-                  width: 32, height: 32, borderRadius: "50%", border: "none",
-                  background: "rgba(255,255,255,0.08)", color: "var(--text-secondary)",
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  onClick={() => {
+                    if (watchHistoryTab === "users") handleOpenWatchHistory();
+                    else fetchPopularMovies();
+                  }}
+                  style={{
+                    width: 32, height: 32, borderRadius: "50%", border: "none",
+                    background: "rgba(255,255,255,0.08)", color: "var(--text-secondary)",
+                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                    <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
+                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setShowWatchHistory(false)}
+                  style={{
+                    width: 32, height: 32, borderRadius: "50%", border: "none",
+                    background: "rgba(255,255,255,0.08)", color: "var(--text-secondary)",
+                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
             </div>
+
+            {/* Subtabs */}
+            <div style={{ display: "flex", gap: 0, marginBottom: isWide ? 12 : 8, flexShrink: 0, borderBottom: "1px solid var(--border)" }}>
+              {(["users", "movies"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => {
+                    setWatchHistoryTab(tab);
+                    if (tab === "movies" && popularMovies.length === 0) fetchPopularMovies();
+                  }}
+                  style={{
+                    flex: 1, padding: isWide ? "8px 12px" : "6px 8px", border: "none", background: "transparent",
+                    color: watchHistoryTab === tab ? "var(--text-primary)" : "var(--text-muted)",
+                    fontSize: isWide ? 13 : 12, fontWeight: 600, cursor: "pointer",
+                    borderBottom: watchHistoryTab === tab ? "2px solid var(--accent, #e50914)" : "2px solid transparent",
+                    marginBottom: -1,
+                  }}
+                >
+                  {tab === "users" ? "Users" : "Movies"}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab content */}
             <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-              {watchHistoryLoading ? (
-                <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>Loading...</div>
-              ) : watchHistory.length === 0 ? (
-                <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>No watch history</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  {watchHistory.map((entry, i) => (
-                    <div key={i} style={{
-                      display: "flex", alignItems: "center", gap: isWide ? 12 : 8,
-                      padding: isWide ? "10px 8px" : "8px 4px", borderRadius: 6,
-                      borderBottom: "1px solid var(--border)",
-                    }}>
-                      {entry.user_picture ? (
-                        <img src={entry.user_picture} alt="" referrerPolicy="no-referrer" style={{
-                          width: isWide ? 32 : 28, height: isWide ? 32 : 28, borderRadius: "50%", flexShrink: 0,
-                        }} />
-                      ) : (
-                        <div style={{
-                          width: isWide ? 32 : 28, height: isWide ? 32 : 28, borderRadius: "50%", flexShrink: 0,
-                          background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: isWide ? 14 : 12, fontWeight: 700, color: "var(--text-muted)",
-                        }}>
-                          {(entry.user_name || entry.user_email || "?")[0].toUpperCase()}
-                        </div>
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          fontSize: isWide ? 13 : 12, fontWeight: 600, color: "var(--text-primary)",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>
-                          {entry.title || entry.url}
-                        </div>
-                        <div style={{ fontSize: isWide ? 11 : 10, color: "var(--text-muted)", marginTop: 2 }}>
-                          {entry.user_name || entry.user_email}
-                          <span style={{ margin: "0 6px" }}>&middot;</span>
-                          {new Date(entry.started_at + "Z").toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
+              {watchHistoryTab === "users" ? (
+                /* Users tab */
+                watchHistoryLoading ? (
+                  <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>Loading...</div>
+                ) : watchHistory.length === 0 ? (
+                  <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>No watch history</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {watchHistory.map((entry, i) => (
+                      <div key={i} style={{
+                        display: "flex", alignItems: "center", gap: isWide ? 12 : 8,
+                        padding: isWide ? "10px 8px" : "8px 4px", borderRadius: 6,
+                        borderBottom: "1px solid var(--border)",
+                      }}>
+                        {entry.user_picture ? (
+                          <img src={entry.user_picture} alt="" referrerPolicy="no-referrer" style={{
+                            width: isWide ? 32 : 28, height: isWide ? 32 : 28, borderRadius: "50%", flexShrink: 0,
+                          }} />
+                        ) : (
+                          <div style={{
+                            width: isWide ? 32 : 28, height: isWide ? 32 : 28, borderRadius: "50%", flexShrink: 0,
+                            background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: isWide ? 14 : 12, fontWeight: 700, color: "var(--text-muted)",
+                          }}>
+                            {(entry.user_name || entry.user_email || "?")[0].toUpperCase()}
+                          </div>
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: isWide ? 13 : 12, fontWeight: 600, color: "var(--text-primary)",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {entry.title || entry.url}
+                          </div>
+                          <div style={{ fontSize: isWide ? 11 : 10, color: "var(--text-muted)", marginTop: 2 }}>
+                            {entry.user_name || entry.user_email}
+                            <span style={{ margin: "0 6px" }}>&middot;</span>
+                            {new Date(entry.started_at + "Z").toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
+                          </div>
                         </div>
                       </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                /* Movies tab */
+                popularMoviesLoading ? (
+                  <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>Loading...</div>
+                ) : popularMovies.length === 0 ? (
+                  <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>No movies</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {/* Auto-download setting */}
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: isWide ? "10px 8px" : "8px 4px",
+                      borderBottom: "1px solid var(--border)",
+                      background: "rgba(255,255,255,0.03)", borderRadius: 6,
+                      marginBottom: 4,
+                    }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16, flexShrink: 0, color: "var(--text-muted)" }}>
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7,10 12,15 17,10" /><line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                      <span style={{ fontSize: isWide ? 12 : 11, color: "var(--text-secondary)", flex: 1 }}>
+                        Auto download when viewers &ge;
+                      </span>
+                      <select
+                        value={autoDownloadThreshold}
+                        onChange={(e) => handleSaveAutoDownload(parseInt(e.target.value))}
+                        style={{
+                          background: "var(--bg-base)", color: "var(--text-primary)", border: "1px solid var(--border)",
+                          borderRadius: 4, padding: "4px 8px", fontSize: isWide ? 12 : 11, cursor: "pointer",
+                        }}
+                      >
+                        <option value={0}>Off</option>
+                        <option value={2}>2</option>
+                        <option value={3}>3</option>
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                      </select>
                     </div>
-                  ))}
-                </div>
+
+                    {/* Movie list */}
+                    {popularMovies.map((movie) => (
+                      <div key={movie.url} style={{
+                        display: "flex", alignItems: "center", gap: isWide ? 12 : 8,
+                        padding: isWide ? "10px 8px" : "8px 4px", borderRadius: 6,
+                        borderBottom: "1px solid var(--border)",
+                      }}>
+                        {/* Viewer count badge */}
+                        <div style={{
+                          width: isWide ? 36 : 30, height: isWide ? 36 : 30, borderRadius: 6, flexShrink: 0,
+                          background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center",
+                          flexDirection: "column",
+                        }}>
+                          <div style={{ fontSize: isWide ? 16 : 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1 }}>
+                            {movie.viewer_count}
+                          </div>
+                          <div style={{ fontSize: 7, color: "var(--text-muted)", lineHeight: 1, marginTop: 1 }}>
+                            {movie.viewer_count === 1 ? "user" : "users"}
+                          </div>
+                        </div>
+
+                        {/* Title + info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: isWide ? 13 : 12, fontWeight: 600, color: "var(--text-primary)",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {movie.title || movie.url}
+                          </div>
+                          <div style={{ fontSize: isWide ? 11 : 10, color: "var(--text-muted)", marginTop: 2 }}>
+                            {movie.play_count} plays
+                            <span style={{ margin: "0 6px" }}>&middot;</span>
+                            {new Date(movie.last_watched + "Z").toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
+                          </div>
+                        </div>
+
+                        {/* Download button */}
+                        {(() => {
+                          const isDownloading = movie.downloading || downloadingUrls.has(movie.url);
+                          return (
+                            <button
+                              onClick={() => !movie.downloaded && !isDownloading && handleDownloadMovie(movie.url)}
+                              disabled={movie.downloaded || isDownloading}
+                              style={{
+                                padding: isWide ? "6px 12px" : "4px 10px", borderRadius: 6,
+                                border: "1px solid var(--border)",
+                                background: movie.downloaded ? "rgba(34,197,94,0.15)" : isDownloading ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.08)",
+                                color: movie.downloaded ? "#22c55e" : isDownloading ? "#3b82f6" : "var(--text-secondary)",
+                                fontSize: isWide ? 11 : 10, fontWeight: 600,
+                                cursor: movie.downloaded || isDownloading ? "default" : "pointer",
+                                whiteSpace: "nowrap", flexShrink: 0,
+                              }}
+                            >
+                              {movie.downloaded ? "Downloaded" : isDownloading ? "Downloading..." : "Download"}
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    ))}
+                  </div>
+                )
               )}
             </div>
           </div>

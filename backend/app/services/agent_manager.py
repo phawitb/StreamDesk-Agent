@@ -85,6 +85,7 @@ class AgentManager:
         self._episode_future: Optional[asyncio.Future] = None
         self._episode_callback: Optional[Callable] = None
         self._user_id: Optional[int] = None
+        self._active_proc: Optional[asyncio.subprocess.Process] = None  # track subprocess for cancellation
 
     def set_user(self, user_id: int):
         self._user_id = user_id
@@ -214,21 +215,43 @@ class AgentManager:
                 self._captured_m3u8.append(url)
                 logger.info("Captured m3u8: %s", url[:120])
 
-    async def play(self, url: str):
+    async def cancel_active(self):
+        """Kill any running subprocess (yt-dlp, ffmpeg, etc.)."""
+        if self._active_proc and self._active_proc.returncode is None:
+            try:
+                self._active_proc.kill()
+                logger.info("Killed active subprocess pid=%d", self._active_proc.pid)
+            except Exception:
+                pass
+            self._active_proc = None
+        # Close browser context if mid-navigation
+        if self._current_agent:
+            try:
+                await self._current_agent.stop()
+            except Exception:
+                pass
+            self._current_agent = None
+
+    async def play(self, url: str, resume_position: float = 0):
         """Play a URL — route to YouTube, Bilibili, or site agent."""
         # Stop current playback before starting new one
         if self._monitor.connected and self._monitor.status.get("playing"):
             logger.info("Stopping current playback before new request")
             await self._monitor.pause()
 
-        if YOUTUBE_RE.search(url):
-            await self._play_youtube(url)
-        elif BILIBILI_RE.search(url):
-            await self._play_with_ytdlp(url, "Bilibili")
-        else:
-            await self._play_site(url)
+        try:
+            if YOUTUBE_RE.search(url):
+                await self._play_youtube(url, resume_position)
+            elif BILIBILI_RE.search(url):
+                await self._play_with_ytdlp(url, "Bilibili", resume_position)
+            else:
+                await self._play_site(url, resume_position)
+        except asyncio.CancelledError:
+            logger.info("Play task cancelled for: %s", url[:80])
+            await self.cancel_active()
+            raise
 
-    async def _play_youtube(self, url: str):
+    async def _play_youtube(self, url: str, resume_position: float = 0):
         """YouTube: download with yt-dlp then play from local file."""
         await self._report("launching", "กำลังเปิด YouTube...")
 
@@ -246,10 +269,10 @@ class AgentManager:
 
         filename = local_path.name
         local_url = self._downloads_url(filename)
-        await self._monitor.open_url(local_url, title)
+        await self._monitor.open_url(local_url, title, start_time=resume_position)
         await self._report("playing", f"กำลังเล่น: {title}")
 
-    async def _play_with_ytdlp(self, url: str, platform_name: str = "Video"):
+    async def _play_with_ytdlp(self, url: str, platform_name: str = "Video", resume_position: float = 0):
         """Download video using yt-dlp and play from local file."""
         await self._report("launching", f"กำลังเปิด {platform_name}...")
 
@@ -264,7 +287,7 @@ class AgentManager:
         if local_path:
             filename = local_path.name
             local_url = self._downloads_url(filename)
-            await self._monitor.open_url(local_url, title)
+            await self._monitor.open_url(local_url, title, start_time=resume_position)
             await self._report("playing", f"กำลังเล่น: {title}")
         else:
             await self._report("error", "ดาวน์โหลดไม่สำเร็จ")
@@ -317,7 +340,9 @@ class AgentManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            self._active_proc = proc
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+            self._active_proc = None
 
             if proc.returncode != 0:
                 logger.error("yt-dlp download failed: %s", stderr.decode()[:500])
@@ -341,7 +366,7 @@ class AgentManager:
             logger.error("yt-dlp download error: %s", e)
         return None
 
-    async def _play_site(self, url: str):
+    async def _play_site(self, url: str, resume_position: float = 0):
         """Navigate to URL with Playwright, capture m3u8, and send to monitor."""
         await self._report("launching", "กำลังเปิด browser...")
 
@@ -391,7 +416,7 @@ class AgentManager:
                     await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
                     return
 
-                await self._monitor.open_url(m3u8_url, self._current_title)
+                await self._monitor.open_url(m3u8_url, self._current_title, start_time=resume_position)
                 await self._monitor.unmute()
                 await self._report("playing", f"กำลังเล่น: {self._current_title}")
             else:

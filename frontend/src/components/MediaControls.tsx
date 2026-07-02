@@ -8,6 +8,7 @@ interface Props {
   isPlaying?: boolean;
   monitorMode?: "inapp" | "device" | "url";
   currentState?: AgentState;
+  onReplay?: () => void;
 }
 
 interface MediaStatus {
@@ -29,7 +30,7 @@ function formatTime(seconds: number): string {
 
 const WAITING_STATES = new Set<string>(["launching", "navigating", "loading_player"]);
 
-export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle" }: Props) {
+export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", onReplay }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: false, volume: 50, muted: false });
   const [displayTime, setDisplayTime] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -198,12 +199,18 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
 
           {/* Play/Pause */}
           <button
-            onClick={() => active && onMediaControl(status.paused ? "resume" : "pause")}
-            disabled={!active}
+            onClick={() => {
+              if (active) {
+                onMediaControl(status.paused ? "resume" : "pause");
+              } else if (onReplay && title) {
+                onReplay();
+              }
+            }}
+            disabled={!active && !onReplay}
             style={{
               width: 36, height: 36, borderRadius: "50%", border: "none",
-              background: active ? "#fff" : "rgba(255,255,255,0.15)",
-              color: "var(--bg-base)", cursor: active ? "pointer" : "default",
+              background: (active || onReplay) ? "#fff" : "rgba(255,255,255,0.15)",
+              color: "var(--bg-base)", cursor: (active || onReplay) ? "pointer" : "default",
               display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
             }}
           >

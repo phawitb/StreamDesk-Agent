@@ -220,6 +220,16 @@
   }
 }
 
+/* ── Desktop Monitor Expanded (fills entire app area) ── */
+.panel-monitor.desktop-expanded {
+  position: fixed !important;
+  inset: 0;
+  z-index: 50;
+  width: 100% !important;
+  height: 100% !important;
+  flex: none !important;
+}
+
 /* ── Monitor Fullscreen (landscape auto / portrait tap toggle) ── */
 .app.monitor-fullscreen .now-playing-bar,
 .app.monitor-fullscreen .bottom-nav {

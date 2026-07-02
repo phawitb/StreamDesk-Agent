@@ -20,6 +20,8 @@ from app.services.gemini_chat import recommend_movies
 from app.services.database import (
     upsert_movies, get_user_by_id, get_user_by_monitor_token, log_watch,
     get_app_setting, set_app_setting, get_all_watch_history,
+    get_popular_movies, get_viewer_count,
+    mark_downloaded, get_downloaded_urls, remove_downloaded,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,8 @@ ADMIN_EMAIL = "phawit.boo@gmail.com"
 
 # Store active WebSocket connections per user: {user_id: [ws, ...]}
 _connections: dict[int, list[WebSocket]] = {}
+# Track active play tasks per user so we can cancel on new request
+_play_tasks: dict[int, asyncio.Task] = {}
 
 
 def _sanitize_floats(obj: dict) -> dict:
@@ -286,9 +290,11 @@ async def update_settings(request: Request, body: dict):
 async def get_app_settings_api():
     force_install = await get_app_setting("force_install", "true")
     max_storage_gb = await get_app_setting("max_storage_gb", "10")
+    auto_download_threshold = await get_app_setting("auto_download_threshold", "0")
     return {
         "force_install": force_install == "true",
         "max_storage_gb": float(max_storage_gb),
+        "auto_download_threshold": int(auto_download_threshold),
     }
 
 
@@ -304,6 +310,12 @@ async def update_app_settings_api(request: Request, body: dict):
         await set_app_setting("force_install", "true" if body["force_install"] else "false")
     if "max_storage_gb" in body:
         await set_app_setting("max_storage_gb", str(float(body["max_storage_gb"])))
+    if "auto_download_threshold" in body:
+        threshold = int(body["auto_download_threshold"])
+        await set_app_setting("auto_download_threshold", str(threshold))
+        # Trigger auto-download for all qualifying movies immediately
+        if threshold > 0:
+            asyncio.create_task(_apply_auto_download_threshold(threshold))
     return {"ok": True}
 
 
@@ -319,6 +331,136 @@ async def admin_watch_history(request: Request, limit: int = 200):
         return JSONResponse({"error": "Forbidden"}, status_code=403)
     history = await get_all_watch_history(limit=limit)
     return history
+
+
+# ── Admin: Popular Movies ──
+
+@router.get("/api/admin/popular-movies")
+async def admin_popular_movies(request: Request):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or user["email"] != ADMIN_EMAIL:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    movies = await get_popular_movies()
+
+    # Check download status from DB mapping + verify file still exists
+    dl_map = await get_downloaded_urls()
+    for movie in movies:
+        dl_filename = dl_map.get(movie["url"])
+        movie["downloaded"] = dl_filename is not None and (VIDEOS_DIR / dl_filename).exists()
+        movie["downloading"] = movie["url"] in _download_tasks and not _download_tasks[movie["url"]].done()
+
+    auto_threshold = await get_app_setting("auto_download_threshold", "0")
+    return {"movies": movies, "auto_download_threshold": int(auto_threshold)}
+
+
+_download_tasks: dict[str, asyncio.Task] = {}
+
+
+@router.post("/api/admin/download-movie")
+async def admin_download_movie(request: Request, body: dict):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or user["email"] != ADMIN_EMAIL:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    url = body.get("url", "").strip()
+    if not url:
+        return JSONResponse({"error": "No URL"}, status_code=400)
+
+    # Check if already downloading
+    if url in _download_tasks and not _download_tasks[url].done():
+        return {"status": "already_downloading"}
+
+    task = asyncio.create_task(_do_download(url))
+    _download_tasks[url] = task
+    return {"status": "downloading"}
+
+
+async def _do_download(url: str):
+    """Download a URL with yt-dlp and record in DB."""
+    from app.services.agent_manager import enforce_storage_limit, DOWNLOADS_DIR
+    await enforce_storage_limit()
+    proc = await asyncio.create_subprocess_exec(
+        "yt-dlp",
+        "-f", "bv*+ba/b",
+        "--merge-output-format", "mp4",
+        "--no-playlist",
+        "--print", "after_move:filepath",
+        "-o", str(DOWNLOADS_DIR / "%(id)s.%(ext)s"),
+        url,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+    if proc.returncode == 0:
+        filepath = stdout.decode().strip().split("\n")[-1].strip()
+        if filepath and Path(filepath).exists():
+            await mark_downloaded(url, Path(filepath).name)
+            logger.info("Downloaded & recorded: %s -> %s", url[:80], Path(filepath).name)
+        else:
+            # Fallback: find newest file
+            files = sorted(DOWNLOADS_DIR.glob("*.mp4"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if files:
+                await mark_downloaded(url, files[0].name)
+                logger.info("Downloaded & recorded (fallback): %s -> %s", url[:80], files[0].name)
+    else:
+        logger.error("yt-dlp download failed for %s: %s", url[:80], stderr.decode()[:300])
+
+
+async def _check_auto_download(url: str):
+    """Auto-download a movie if viewer count meets the threshold."""
+    try:
+        threshold_str = await get_app_setting("auto_download_threshold", "0")
+        threshold = int(threshold_str)
+        if threshold <= 0:
+            return
+
+        viewer_count = await get_viewer_count(url)
+        if viewer_count < threshold:
+            return
+
+        # Check if already downloaded via DB
+        dl_map = await get_downloaded_urls()
+        if url in dl_map and (VIDEOS_DIR / dl_map[url]).exists():
+            return
+
+        # Check if already downloading
+        if url in _download_tasks and not _download_tasks[url].done():
+            return
+
+        logger.info("Auto-download triggered: %s (viewers=%d, threshold=%d)", url[:80], viewer_count, threshold)
+        task = asyncio.create_task(_do_download(url))
+        _download_tasks[url] = task
+    except Exception as e:
+        logger.error("Auto-download check failed: %s", e)
+
+
+async def _apply_auto_download_threshold(threshold: int):
+    """Check all popular movies and auto-download those meeting the threshold."""
+    try:
+        movies = await get_popular_movies()
+        dl_map = await get_downloaded_urls()
+
+        for movie in movies:
+            url = movie["url"]
+            if movie["viewer_count"] < threshold:
+                continue
+            if url in dl_map and (VIDEOS_DIR / dl_map[url]).exists():
+                continue
+            if url in _download_tasks and not _download_tasks[url].done():
+                continue
+
+            logger.info("Auto-download (threshold change): %s (viewers=%d)", url[:80], movie["viewer_count"])
+            task = asyncio.create_task(_do_download(url))
+            _download_tasks[url] = task
+    except Exception as e:
+        logger.error("Apply auto-download threshold failed: %s", e)
 
 
 # ── Admin: Video Storage Management ──
@@ -365,6 +507,7 @@ async def admin_delete_video(request: Request, filename: str):
     # Security: ensure path is within VIDEOS_DIR
     if not filepath.resolve().parent == VIDEOS_DIR.resolve():
         return JSONResponse({"error": "Forbidden"}, status_code=403)
+    await remove_downloaded(filename)
     filepath.unlink()
     return {"ok": True}
 
@@ -381,6 +524,7 @@ async def admin_delete_all_videos(request: Request):
     if VIDEOS_DIR.exists():
         for f in VIDEOS_DIR.iterdir():
             if f.is_file():
+                await remove_downloaded(f.name)
                 f.unlink()
                 deleted += 1
     return {"ok": True, "deleted": deleted}
@@ -545,12 +689,22 @@ async def websocket_endpoint(ws: WebSocket):
                 query = msg.get("query", "")
 
                 if url:
+                    # Cancel previous play task for this user
+                    old_task = _play_tasks.get(user_id)
+                    if old_task and not old_task.done():
+                        old_task.cancel()
+                        await agent_manager.cancel_active()
+                        logger.info("Cancelled previous play task for user %d", user_id)
+
                     await broadcast(ChatMessage(content=f"รับคำสั่งแล้ว กำลังเปิด: {url}").model_dump(), user_id)
-                    # Log watch history
+                    # Log watch history + auto-download check
                     user = await get_user_by_id(user_id)
                     if user:
                         asyncio.create_task(log_watch(user["email"], url))
-                    asyncio.create_task(agent_manager.play(url))
+                        asyncio.create_task(_check_auto_download(url))
+                    resume_pos = float(msg.get("resume_position", 0))
+                    task = asyncio.create_task(agent_manager.play(url, resume_position=resume_pos))
+                    _play_tasks[user_id] = task
                 elif query:
                     asyncio.create_task(_handle_recommendation(query, user_id))
                 else:

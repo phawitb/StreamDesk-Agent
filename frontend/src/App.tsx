@@ -16,12 +16,14 @@ function App() {
   const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">("browse");
   const [forceInstall, setForceInstall] = useState(true);
   const [currentPoster, setCurrentPoster] = useState("");
+  const [playingUrl, setPlayingUrl] = useState("");
   const [monitorMode, setMonitorMode] = useState<"inapp" | "device" | "url">(() => {
     const stored = localStorage.getItem("monitorMode");
     if (stored === "inapp" || stored === "device" || stored === "url") return stored;
     return "inapp"; // default
   });
   const [monitorFullscreen, setMonitorFullscreen] = useState(false);
+  const [desktopMonitorExpanded, setDesktopMonitorExpanded] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [monitorToken, setMonitorToken] = useState<string | null>(null);
 
@@ -165,6 +167,30 @@ function App() {
     return () => window.removeEventListener("resize", checkOrientation);
   }, []);
 
+  // Save watch progress from media_status events
+  const playingUrlRef = useRef(playingUrl);
+  playingUrlRef.current = playingUrl;
+  useEffect(() => {
+    let lastSave = 0;
+    const handler = (e: CustomEvent) => {
+      const data = e.detail;
+      if (data.type === "media_status" && playingUrlRef.current) {
+        const ct = data.currentTime || 0;
+        const dur = data.duration || 0;
+        if (dur > 0 && ct > 5 && Date.now() - lastSave > 3000) {
+          lastSave = Date.now();
+          try {
+            const progress = JSON.parse(localStorage.getItem("streamdesk_progress") || "{}");
+            progress[playingUrlRef.current] = { currentTime: ct, duration: dur };
+            localStorage.setItem("streamdesk_progress", JSON.stringify(progress));
+          } catch {}
+        }
+      }
+    };
+    window.addEventListener("media_status" as any, handler as any);
+    return () => window.removeEventListener("media_status" as any, handler as any);
+  }, []);
+
   // Detect virtual keyboard via visualViewport height
   useEffect(() => {
     const vv = window.visualViewport;
@@ -283,7 +309,15 @@ function App() {
         setActiveTab("chat");
         return;
       }
-      send({ type: "play_request", ...(isUrl ? { url: text } : { query: text }) });
+      if (isUrl) {
+        const progress = JSON.parse(localStorage.getItem("streamdesk_progress") || "{}");
+        const saved = progress[text];
+        const resumePos = saved?.currentTime && saved?.duration && saved.currentTime < saved.duration - 10 ? saved.currentTime : 0;
+        send({ type: "play_request", url: text, resume_position: resumePos });
+        setPlayingUrl(text);
+      } else {
+        send({ type: "play_request", query: text });
+      }
       messages.push({ type: "chat", role: "user", content: text });
       // Extract YouTube/Bilibili thumbnail
       if (isUrl) {
@@ -308,7 +342,11 @@ function App() {
         setActiveTab("chat");
         return;
       }
-      send({ type: "play_request", url });
+      const progress = JSON.parse(localStorage.getItem("streamdesk_progress") || "{}");
+      const saved = progress[url];
+      const resumePos = saved?.currentTime && saved?.duration && saved.currentTime < saved.duration - 10 ? saved.currentTime : 0;
+      send({ type: "play_request", url, resume_position: resumePos });
+      setPlayingUrl(url);
       messages.push({ type: "chat", role: "user", content: url });
       if (poster) setCurrentPoster(poster);
       setActiveTab("chat");
@@ -319,6 +357,12 @@ function App() {
   const isPlaying = currentState === "playing";
   const showMonitorTab = monitorMode === "inapp";
   const isAdmin = user?.email === "phawit.boo@gmail.com";
+
+  const handleReplay = useCallback(() => {
+    if (playingUrl) {
+      handleSelectMovie(playingUrl, currentPoster || undefined);
+    }
+  }, [playingUrl, currentPoster, handleSelectMovie]);
 
   // Reset poster when state goes idle
   useEffect(() => {
@@ -429,18 +473,46 @@ function App() {
 
   const monitorPanel = showMonitorTab ? (
     <div
-      className="panel-monitor"
+      className={`panel-monitor${desktopMonitorExpanded ? " desktop-expanded" : ""}`}
       onClick={() => {
         if (!isDesktop && activeTab === "monitor" && !isLandscape) {
           setMonitorFullscreen((f) => !f);
         }
       }}
+      style={{ position: "relative" }}
     >
       <iframe
         src="/monitorin"
         style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
         allow="autoplay; fullscreen"
       />
+      {isDesktop && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setDesktopMonitorExpanded((v) => !v); }}
+          style={{
+            position: "absolute", top: 8, right: 8, zIndex: 10,
+            width: 32, height: 32, borderRadius: 6, border: "none",
+            background: "rgba(0,0,0,0.6)", color: "#fff",
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            backdropFilter: "blur(4px)", opacity: 0.7, transition: "opacity 0.2s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.7"; }}
+          title={desktopMonitorExpanded ? "Exit fullscreen" : "Fullscreen"}
+        >
+          {desktopMonitorExpanded ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+              <polyline points="4,14 10,14 10,20" /><polyline points="20,10 14,10 14,4" />
+              <line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+              <polyline points="15,3 21,3 21,9" /><polyline points="9,21 3,21 3,15" />
+              <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          )}
+        </button>
+      )}
     </div>
   ) : null;
 
@@ -483,7 +555,7 @@ function App() {
 
       {!keyboardVisible && (
         <div className="now-playing-bar">
-          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} />
+          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} onReplay={playingUrl ? handleReplay : undefined} />
         </div>
       )}
 

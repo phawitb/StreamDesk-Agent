@@ -61,6 +61,13 @@ async def init_db():
                 value TEXT NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS downloaded_movies (
+                url TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.commit()
         logger.info("Database initialized at %s", DB_PATH)
     finally:
@@ -314,5 +321,75 @@ async def get_all_watch_history(limit: int = 200) -> list[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def get_popular_movies() -> list[dict]:
+    """Aggregate watch history by URL, count unique users, return sorted by viewer count."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT url, MAX(title) as title,
+                   COUNT(DISTINCT user_email) as viewer_count,
+                   COUNT(*) as play_count,
+                   MAX(started_at) as last_watched
+            FROM watch_history
+            WHERE url != ''
+            GROUP BY url
+            ORDER BY viewer_count DESC, play_count DESC
+            """,
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def get_viewer_count(url: str) -> int:
+    """Get number of unique viewers for a URL."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT COUNT(DISTINCT user_email) FROM watch_history WHERE url = ?",
+            (url,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+    finally:
+        await db.close()
+
+
+async def mark_downloaded(url: str, filename: str):
+    """Record that a URL has been downloaded to a file."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO downloaded_movies (url, filename) VALUES (?, ?) ON CONFLICT(url) DO UPDATE SET filename = excluded.filename, downloaded_at = CURRENT_TIMESTAMP",
+            (url, filename),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_downloaded_urls() -> dict[str, str]:
+    """Get all downloaded URL -> filename mappings."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT url, filename FROM downloaded_movies")
+        rows = await cursor.fetchall()
+        return {row["url"]: row["filename"] for row in rows}
+    finally:
+        await db.close()
+
+
+async def remove_downloaded(filename: str):
+    """Remove download record when file is deleted."""
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM downloaded_movies WHERE filename = ?", (filename,))
+        await db.commit()
     finally:
         await db.close()

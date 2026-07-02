@@ -166,6 +166,7 @@
         let userActivated = false; // Has user tapped to allow autoplay?
         let pendingPlay = null; // {url, platform} queued before activation
         let showStandbyOnIdle = true; // Show QR standby when idle (false for in-app)
+        let pendingStartTime = 0; // Resume position for OPEN_URL
 
         const idleScreen = document.getElementById('idle-screen');
         const standbyScreen = document.getElementById('standby-screen');
@@ -277,6 +278,7 @@
                 case 'OPEN_URL':
                     currentMediaUrl = cmd.url || '';
                     currentMediaTitle = cmd.title || '';
+                    pendingStartTime = cmd.start_time || 0;
                     openMedia(cmd.url, cmd.platform || '');
                     if (cmd.title) showToast(cmd.title);
                     break;
@@ -356,6 +358,17 @@
             videoPlayer.volume = currentVolume / 100;
             videoPlayer.src = url;
             videoPlayer.muted = isMuted;
+
+            // Resume from saved position
+            if (pendingStartTime > 0) {
+                const resumeTime = pendingStartTime;
+                pendingStartTime = 0;
+                videoPlayer.addEventListener('loadeddata', () => {
+                    if (resumeTime < videoPlayer.duration) {
+                        videoPlayer.currentTime = resumeTime;
+                    }
+                }, { once: true });
+            }
 
             videoPlayer.play().then(() => {
                 if (!document.fullscreenElement) {

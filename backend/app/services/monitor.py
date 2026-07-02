@@ -111,11 +111,13 @@ class MonitorController:
         if data.get("title"):
             self._status["title"] = data["title"]
 
-    async def open_url(self, url: str, title: str = "", platform: str = "") -> None:
-        logger.info("Opening on monitor: %s (%s) platform=%s", title, url[:80], platform)
+    async def open_url(self, url: str, title: str = "", platform: str = "", start_time: float = 0) -> None:
+        logger.info("Opening on monitor: %s (%s) platform=%s start=%.0f", title, url[:80], platform, start_time)
         cmd = {"action": "OPEN_URL", "url": url, "title": title}
         if platform:
             cmd["platform"] = platform
+        if start_time > 0:
+            cmd["start_time"] = start_time
         await self._send(cmd)
         self._status["playing"] = True
         self._status["title"] = title
