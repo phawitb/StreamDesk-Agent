@@ -17,12 +17,16 @@ from app.services.agent_manager import agent_manager
 from app.services.monitor import monitor_manager
 from app.services.scraper import scrape_movies, scrape_categories, sync_all_movies
 from app.services.gemini_chat import recommend_movies
-from app.services.database import upsert_movies, get_user_by_id, get_user_by_monitor_token, log_watch
+from app.services.database import (
+    upsert_movies, get_user_by_id, get_user_by_monitor_token, log_watch,
+    get_app_setting, set_app_setting, get_all_watch_history,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+ADMIN_EMAIL = "phawit.boo@gmail.com"
 
 # Store active WebSocket connections per user: {user_id: [ws, ...]}
 _connections: dict[int, list[WebSocket]] = {}
@@ -274,6 +278,112 @@ async def update_settings(request: Request, body: dict):
             msg = StatusMessage(state=AgentState.IDLE, message="เปลี่ยนจอแล้ว รอคำสั่งใหม่")
             await broadcast(msg.model_dump(), user_id)
     return {"ok": True}
+
+
+# ── App Settings (global, admin-only write) ──
+
+@router.get("/api/app-settings")
+async def get_app_settings_api():
+    force_install = await get_app_setting("force_install", "true")
+    max_storage_gb = await get_app_setting("max_storage_gb", "10")
+    return {
+        "force_install": force_install == "true",
+        "max_storage_gb": float(max_storage_gb),
+    }
+
+
+@router.patch("/api/app-settings")
+async def update_app_settings_api(request: Request, body: dict):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or user["email"] != ADMIN_EMAIL:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    if "force_install" in body:
+        await set_app_setting("force_install", "true" if body["force_install"] else "false")
+    if "max_storage_gb" in body:
+        await set_app_setting("max_storage_gb", str(float(body["max_storage_gb"])))
+    return {"ok": True}
+
+
+# ── Admin: Watch History ──
+
+@router.get("/api/admin/watch-history")
+async def admin_watch_history(request: Request, limit: int = 200):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or user["email"] != ADMIN_EMAIL:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    history = await get_all_watch_history(limit=limit)
+    return history
+
+
+# ── Admin: Video Storage Management ──
+
+VIDEOS_DIR = Path(__file__).parent.parent.parent / "downloads"
+
+
+@router.get("/api/admin/videos")
+async def admin_list_videos(request: Request):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or user["email"] != ADMIN_EMAIL:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    videos = []
+    total_size = 0
+    if VIDEOS_DIR.exists():
+        for f in sorted(VIDEOS_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.is_file():
+                stat = f.stat()
+                total_size += stat.st_size
+                videos.append({
+                    "filename": f.name,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+    max_gb = float(await get_app_setting("max_storage_gb", "10"))
+    return {"videos": videos, "total_size": total_size, "max_storage_bytes": int(max_gb * 1024 * 1024 * 1024)}
+
+
+@router.delete("/api/admin/videos/{filename}")
+async def admin_delete_video(request: Request, filename: str):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or user["email"] != ADMIN_EMAIL:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    filepath = VIDEOS_DIR / filename
+    if not filepath.exists() or not filepath.is_file():
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    # Security: ensure path is within VIDEOS_DIR
+    if not filepath.resolve().parent == VIDEOS_DIR.resolve():
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    filepath.unlink()
+    return {"ok": True}
+
+
+@router.delete("/api/admin/videos")
+async def admin_delete_all_videos(request: Request):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or user["email"] != ADMIN_EMAIL:
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    deleted = 0
+    if VIDEOS_DIR.exists():
+        for f in VIDEOS_DIR.iterdir():
+            if f.is_file():
+                f.unlink()
+                deleted += 1
+    return {"ok": True, "deleted": deleted}
 
 
 # ── Movie API ──

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./hooks/useAuth";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { usePWAInstall } from "./hooks/usePWAInstall";
 import { ChatWindow } from "./components/ChatWindow";
 import { MovieBrowser } from "./components/MovieBrowser";
 import { MediaControls } from "./components/MediaControls";
@@ -11,7 +12,9 @@ import "./App.css";
 function App() {
   const { user, loading: authLoading, login, logout } = useAuth();
   const { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, send } = useWebSocket();
+  const { canInstall, install } = usePWAInstall();
   const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">("browse");
+  const [forceInstall, setForceInstall] = useState(true);
   const [currentPoster, setCurrentPoster] = useState("");
   const [monitorMode, setMonitorMode] = useState<"inapp" | "device" | "url">(() => {
     const stored = localStorage.getItem("monitorMode");
@@ -44,7 +47,20 @@ function App() {
         if (data.monitor_token) setMonitorToken(data.monitor_token);
       })
       .catch(() => {});
+    fetch("/api/app-settings")
+      .then((r) => r.json())
+      .then((data) => setForceInstall(!!data.force_install))
+      .catch(() => {});
   }, [setPairedDevice]);
+
+  const handleForceInstallChange = useCallback(async (enabled: boolean) => {
+    setForceInstall(enabled);
+    await fetch("/api/app-settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force_install: enabled }),
+    }).catch(() => {});
+  }, []);
 
   const handlePairDevice = useCallback(async (key: string) => {
     try {
@@ -76,9 +92,17 @@ function App() {
     const stored = localStorage.getItem("desktopRightWidth");
     return stored ? parseInt(stored) : Math.round(window.innerWidth / 3);
   });
-  const dividerRef = useRef<HTMLDivElement>(null);
   const rightWidthRef = useRef(rightWidth);
   rightWidthRef.current = rightWidth;
+  const [fontScale, setFontScale] = useState(() => {
+    const stored = localStorage.getItem("fontScale");
+    if (stored) return parseFloat(stored);
+    return window.innerWidth > 768 ? 1.2 : 1.0;
+  });
+  const handleFontScaleChange = useCallback((scale: number) => {
+    setFontScale(scale);
+    localStorage.setItem("fontScale", String(scale));
+  }, []);
 
   // Detect desktop vs mobile
   useEffect(() => {
@@ -87,54 +111,48 @@ function App() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Draggable column divider
-  useEffect(() => {
-    if (!isDesktop) return;
-    const divider = dividerRef.current;
-    if (!divider) return;
-
-    let startX = 0;
-    let startWidth = 0;
-
-    const onMove = (clientX: number) => {
-      const delta = startX - clientX;
-      const newWidth = Math.max(280, Math.min(window.innerWidth * 0.6, startWidth + delta));
-      setRightWidth(newWidth);
+  // Draggable column divider — inline handlers (no ref/useEffect needed)
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = rightWidthRef.current;
+    const target = e.currentTarget as HTMLElement;
+    target.classList.add("dragging");
+    const onMove = (ev: MouseEvent) => {
+      ev.preventDefault();
+      const delta = startX - ev.clientX;
+      const newW = Math.max(280, Math.min(window.innerWidth * 0.6, startW + delta));
+      setRightWidth(newW);
     };
-
-    const onMouseMove = (e: MouseEvent) => { e.preventDefault(); onMove(e.clientX); };
-    const onTouchMove = (e: TouchEvent) => { onMove(e.touches[0].clientX); };
-
-    const onEnd = () => {
-      divider.classList.remove("dragging");
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onEnd);
-      document.removeEventListener("touchmove", onTouchMove);
-      document.removeEventListener("touchend", onEnd);
+    const onUp = () => {
+      target.classList.remove("dragging");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
       localStorage.setItem("desktopRightWidth", String(rightWidthRef.current));
     };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, []);
 
-    const onMouseDown = (e: MouseEvent) => {
-      startX = e.clientX; startWidth = rightWidthRef.current;
-      divider.classList.add("dragging");
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onEnd);
+  const handleDividerTouchStart = useCallback((e: React.TouchEvent) => {
+    const startX = e.touches[0].clientX;
+    const startW = rightWidthRef.current;
+    const target = e.currentTarget as HTMLElement;
+    target.classList.add("dragging");
+    const onMove = (ev: TouchEvent) => {
+      const delta = startX - ev.touches[0].clientX;
+      const newW = Math.max(280, Math.min(window.innerWidth * 0.6, startW + delta));
+      setRightWidth(newW);
     };
-
-    const onTouchStart = (e: TouchEvent) => {
-      startX = e.touches[0].clientX; startWidth = rightWidthRef.current;
-      divider.classList.add("dragging");
-      document.addEventListener("touchmove", onTouchMove);
-      document.addEventListener("touchend", onEnd);
+    const onUp = () => {
+      target.classList.remove("dragging");
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onUp);
+      localStorage.setItem("desktopRightWidth", String(rightWidthRef.current));
     };
-
-    divider.addEventListener("mousedown", onMouseDown);
-    divider.addEventListener("touchstart", onTouchStart);
-    return () => {
-      divider.removeEventListener("mousedown", onMouseDown);
-      divider.removeEventListener("touchstart", onTouchStart);
-    };
-  }, [isDesktop]);
+    document.addEventListener("touchmove", onMove);
+    document.addEventListener("touchend", onUp);
+  }, []);
 
   // Detect landscape orientation
   useEffect(() => {
@@ -323,6 +341,56 @@ function App() {
     return <LoginScreen onLogin={login} />;
   }
 
+  // Force install gate — mobile only, admin is exempt
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+    || (navigator as any).standalone === true;
+  const isMobileDevice = window.innerWidth <= 768;
+  const isAdmin_ = user.email === "phawit.boo@gmail.com";
+  if (forceInstall && !isStandalone && isMobileDevice && !isAdmin_) {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    return (
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        height: "100dvh", background: "var(--bg-base)", padding: 32, textAlign: "center",
+      }}>
+        <img src="/icon-192.png" alt="StreamDesk" style={{ width: 96, height: 96, borderRadius: 20, marginBottom: 24 }} />
+        <h2 style={{ color: "var(--text-primary)", fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
+          Install StreamDesk
+        </h2>
+        <p style={{ color: "var(--text-secondary)", fontSize: 14, lineHeight: 1.6, maxWidth: 320, marginBottom: 24 }}>
+          {isIOS
+            ? 'กดปุ่ม Share (กล่องมีลูกศร) แล้วเลือก "Add to Home Screen" เพื่อติดตั้งแอป'
+            : "กรุณาติดตั้งแอปลงเครื่องก่อนใช้งาน"}
+        </p>
+        {canInstall && !isIOS && (
+          <button
+            onClick={install}
+            style={{
+              padding: "14px 40px", borderRadius: 8, border: "none",
+              background: "var(--accent)", color: "#fff",
+              fontSize: 16, fontWeight: 700, cursor: "pointer",
+            }}
+          >
+            Install App
+          </button>
+        )}
+        {isIOS && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            color: "var(--text-muted)", fontSize: 13, marginTop: 8,
+          }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 20, height: 20 }}>
+              <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8" />
+              <polyline points="16,6 12,2 8,6" />
+              <line x1="12" y1="2" x2="12" y2="15" />
+            </svg>
+            Share &gt; Add to Home Screen
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const browsePanel = (
     <MovieBrowser
       onSelectMovie={handleSelectMovie}
@@ -337,6 +405,11 @@ function App() {
       isExternalDisconnected={isExternalDisconnected}
       user={user}
       onLogout={logout}
+      isAdmin={isAdmin}
+      fontScale={fontScale}
+      onFontScaleChange={handleFontScaleChange}
+      forceInstall={forceInstall}
+      onForceInstallChange={handleForceInstallChange}
     />
   );
 
@@ -372,7 +445,7 @@ function App() {
   ) : null;
 
   return (
-    <div className={`app ${monitorIsFullscreen ? "monitor-fullscreen" : ""}`}>
+    <div className={`app ${monitorIsFullscreen ? "monitor-fullscreen" : ""}`} style={fontScale !== 1 ? { zoom: fontScale, height: `calc(100dvh / ${fontScale})` } : undefined}>
       <div className="app-body">
         <div className="main-content">
           {isDesktop ? (
@@ -381,7 +454,7 @@ function App() {
               <div className="panel-browse">{browsePanel}</div>
 
               {/* Draggable divider */}
-              <div className="column-divider" ref={dividerRef} />
+              <div className="column-divider" onMouseDown={handleDividerMouseDown} onTouchStart={handleDividerTouchStart} />
 
               {/* Right column: Monitor (small) + Chat */}
               <div className="desktop-right" style={{ width: rightWidth }}>

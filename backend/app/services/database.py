@@ -55,6 +55,12 @@ async def init_db():
                 started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
         await db.commit()
         logger.info("Database initialized at %s", DB_PATH)
     finally:
@@ -266,5 +272,47 @@ async def log_watch(user_email: str, url: str, title: str = ""):
             (user_email, url, title),
         )
         await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_app_setting(key: str, default: str = "") -> str:
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+        row = await cursor.fetchone()
+        return row["value"] if row else default
+    finally:
+        await db.close()
+
+
+async def set_app_setting(key: str, value: str):
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_all_watch_history(limit: int = 200) -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT wh.user_email, u.name as user_name, u.picture as user_picture,
+                   wh.url, wh.title, wh.started_at
+            FROM watch_history wh
+            LEFT JOIN users u ON wh.user_email = u.email
+            ORDER BY wh.started_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
     finally:
         await db.close()

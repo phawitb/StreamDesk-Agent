@@ -190,19 +190,28 @@
     border-left: none;
   }
 
-  /* Resizable divider */
+  /* Resizable divider — wide hit area, thin visual line */
   .column-divider {
-    width: 5px;
+    width: 12px;
     cursor: col-resize;
     background: transparent;
     flex-shrink: 0;
     position: relative;
     z-index: 10;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .column-divider::after {
+    content: "";
+    width: 2px;
+    background: transparent;
     transition: background 0.15s;
   }
 
-  .column-divider:hover,
-  .column-divider.dragging {
+  .column-divider:hover::after,
+  .column-divider.dragging::after {
     background: var(--accent);
   }
 

@@ -15,6 +15,27 @@ from app.services.monitor import monitor_manager, MonitorController
 DOWNLOADS_DIR = Path(__file__).parent.parent.parent / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
+
+async def enforce_storage_limit():
+    """Delete oldest files until total size is under the max_storage_gb setting."""
+    from app.services.database import get_app_setting
+    max_gb_str = await get_app_setting("max_storage_gb", "10")
+    try:
+        max_bytes = float(max_gb_str) * 1024 * 1024 * 1024
+    except ValueError:
+        max_bytes = 10 * 1024 * 1024 * 1024
+
+    files = sorted(DOWNLOADS_DIR.glob("*"), key=lambda f: f.stat().st_mtime)
+    total = sum(f.stat().st_size for f in files if f.is_file())
+
+    while total > max_bytes and files:
+        oldest = files.pop(0)
+        if oldest.is_file():
+            size = oldest.stat().st_size
+            oldest.unlink()
+            total -= size
+            logger.info("Storage cleanup: deleted %s (%.1f MB)", oldest.name, size / 1024 / 1024)
+
 YOUTUBE_RE = re.compile(r'(youtube\.com|youtu\.be)')
 BILIBILI_RE = re.compile(r'(bilibili\.com|bilibili\.tv|b23\.tv|bili\.im)')
 
@@ -282,6 +303,7 @@ class AgentManager:
 
     async def _download_ytdlp(self, url: str) -> Optional[Path]:
         """Download video using yt-dlp to local file."""
+        await enforce_storage_limit()
         output_template = str(DOWNLOADS_DIR / "%(id)s.%(ext)s")
         try:
             proc = await asyncio.create_subprocess_exec(
