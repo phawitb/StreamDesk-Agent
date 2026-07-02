@@ -203,42 +203,37 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
               </svg>
             </button>
 
-            {/* Settings panel — modal on desktop, dropdown on mobile */}
+            {/* Settings panel — centered modal */}
             {showSettings && (
               <>
                 <div style={{
                   position: "fixed", inset: 0, zIndex: 99,
-                  background: window.innerWidth > 768 ? "rgba(0,0,0,0.6)" : "transparent",
+                  background: "rgba(0,0,0,0.6)",
                 }} onClick={() => setShowSettings(false)} />
-                <div style={window.innerWidth > 768 ? {
+                <div style={{
                   position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
                   zIndex: 100, background: "var(--bg-elevated)", border: "1px solid var(--border)",
-                  borderRadius: 12, padding: 16, width: 400, maxWidth: "90vw",
+                  borderRadius: 12, padding: isWide ? 24 : 16,
+                  width: isWide ? "min(560px, 60vw)" : "calc(100vw - 32px)",
+                  maxHeight: "85vh", overflowY: "auto",
                   boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
-                } : {
-                  position: "absolute", right: 0, top: 42, zIndex: 100,
-                  background: "var(--bg-elevated)", border: "1px solid var(--border)",
-                  borderRadius: 8, padding: 6, minWidth: 200,
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
                 }}>
-                  {/* Title for desktop modal */}
-                  {isWide && (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                      <h3 style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>Settings</h3>
-                      <button
-                        onClick={() => setShowSettings(false)}
-                        style={{
-                          width: 32, height: 32, borderRadius: "50%", border: "none",
-                          background: "rgba(255,255,255,0.08)", color: "var(--text-secondary)",
-                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                        }}
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
+                  {/* Title + close button */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isWide ? 16 : 12 }}>
+                    <h3 style={{ fontSize: isWide ? 20 : 17, fontWeight: 700, color: "var(--text-primary)" }}>Settings</h3>
+                    <button
+                      onClick={() => setShowSettings(false)}
+                      style={{
+                        width: 32, height: 32, borderRadius: "50%", border: "none",
+                        background: "rgba(255,255,255,0.08)", color: "var(--text-secondary)",
+                        cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
 
                   <button
                     onClick={handleSync}

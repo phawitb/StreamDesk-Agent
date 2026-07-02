@@ -74,9 +74,11 @@ function App() {
   const [isDesktop, setIsDesktop] = useState(window.innerWidth > 768);
   const [rightWidth, setRightWidth] = useState(() => {
     const stored = localStorage.getItem("desktopRightWidth");
-    return stored ? parseInt(stored) : Math.round(window.innerWidth * 0.25);
+    return stored ? parseInt(stored) : Math.round(window.innerWidth / 3);
   });
   const dividerRef = useRef<HTMLDivElement>(null);
+  const rightWidthRef = useRef(rightWidth);
+  rightWidthRef.current = rightWidth;
 
   // Detect desktop vs mobile
   useEffect(() => {
@@ -96,7 +98,7 @@ function App() {
 
     const onMove = (clientX: number) => {
       const delta = startX - clientX;
-      const newWidth = Math.max(280, Math.min(window.innerWidth * 0.5, startWidth + delta));
+      const newWidth = Math.max(280, Math.min(window.innerWidth * 0.6, startWidth + delta));
       setRightWidth(newWidth);
     };
 
@@ -109,18 +111,18 @@ function App() {
       document.removeEventListener("mouseup", onEnd);
       document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onEnd);
-      setRightWidth((w) => { localStorage.setItem("desktopRightWidth", String(w)); return w; });
+      localStorage.setItem("desktopRightWidth", String(rightWidthRef.current));
     };
 
     const onMouseDown = (e: MouseEvent) => {
-      startX = e.clientX; startWidth = rightWidth;
+      startX = e.clientX; startWidth = rightWidthRef.current;
       divider.classList.add("dragging");
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onEnd);
     };
 
     const onTouchStart = (e: TouchEvent) => {
-      startX = e.touches[0].clientX; startWidth = rightWidth;
+      startX = e.touches[0].clientX; startWidth = rightWidthRef.current;
       divider.classList.add("dragging");
       document.addEventListener("touchmove", onTouchMove);
       document.addEventListener("touchend", onEnd);
@@ -132,7 +134,7 @@ function App() {
       divider.removeEventListener("mousedown", onMouseDown);
       divider.removeEventListener("touchstart", onTouchStart);
     };
-  }, [isDesktop, rightWidth]);
+  }, [isDesktop]);
 
   // Detect landscape orientation
   useEffect(() => {
