@@ -17,7 +17,7 @@ interface HistoryItem {
 }
 
 interface Props {
-  onSelectMovie: (url: string, poster?: string) => void;
+  onSelectMovie: (url: string, poster?: string, title?: string) => void;
   connected?: boolean;
   currentState?: AgentState;
   monitorMode?: "inapp" | "device" | "url";
@@ -152,11 +152,22 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
         refresh();
       }
     };
+    // Listen for history update when movie starts playing
+    const onHistoryUpdate = (e: Event) => {
+      const { url, poster, title } = (e as CustomEvent).detail || {};
+      if (url) {
+        const updated = addToHistory({ url, poster, title });
+        setHistory(updated);
+        setWatchProgress(getWatchProgress());
+      }
+    };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("media_status" as any, onMediaStatus);
+    window.addEventListener("streamdesk_history" as any, onHistoryUpdate);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("media_status" as any, onMediaStatus);
+      window.removeEventListener("streamdesk_history" as any, onHistoryUpdate);
     };
   }, []);
 
@@ -195,10 +206,7 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
 
   const handleSelectMovieWithHistory = useCallback(
     (url: string, poster?: string, title?: string) => {
-      const updated = addToHistory({ title, url, poster });
-      setHistory(updated);
-      setWatchProgress(getWatchProgress());
-      onSelectMovie(url, poster);
+      onSelectMovie(url, poster, title);
     },
     [onSelectMovie]
   );

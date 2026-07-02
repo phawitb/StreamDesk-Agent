@@ -23,6 +23,7 @@ function App() {
     return "inapp"; // default
   });
   const [monitorFullscreen, setMonitorFullscreen] = useState(false);
+  const [orientationLock, setOrientationLock] = useState<"auto" | "landscape" | "portrait">("auto");
   const [desktopMonitorExpanded, setDesktopMonitorExpanded] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [monitorToken, setMonitorToken] = useState<string | null>(null);
@@ -156,16 +157,47 @@ function App() {
     document.addEventListener("touchend", onUp);
   }, []);
 
-  // Detect landscape orientation
+  // Detect landscape orientation (only when not locked)
+  const orientationLockRef = useRef(orientationLock);
+  orientationLockRef.current = orientationLock;
   useEffect(() => {
     const checkOrientation = () => {
-      const landscape = window.innerWidth > window.innerHeight;
-      setIsLandscape(landscape);
+      if (orientationLockRef.current === "auto") {
+        setIsLandscape(window.innerWidth > window.innerHeight);
+      }
     };
     checkOrientation();
     window.addEventListener("resize", checkOrientation);
     return () => window.removeEventListener("resize", checkOrientation);
   }, []);
+
+  // Lock/unlock screen orientation via API
+  useEffect(() => {
+    const so = screen?.orientation;
+    if (!so?.lock) return;
+    if (orientationLock === "auto") {
+      so.unlock?.();
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    } else {
+      const lockOrientation = async () => {
+        try {
+          // Some browsers require fullscreen to lock orientation
+          if (!document.fullscreenElement) {
+            await document.documentElement.requestFullscreen?.().catch(() => {});
+          }
+          await so.lock(orientationLock === "landscape" ? "landscape" : "portrait");
+        } catch {
+          // Fallback: at least set isLandscape based on lock
+          setIsLandscape(orientationLock === "landscape");
+        }
+      };
+      lockOrientation();
+    }
+    return () => {
+      so.unlock?.();
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    };
+  }, [orientationLock]);
 
   // Save watch progress from media_status events
   const playingUrlRef = useRef(playingUrl);
@@ -204,7 +236,8 @@ function App() {
     return () => vv.removeEventListener("resize", onResize);
   }, []);
 
-  const monitorIsFullscreen = activeTab === "monitor" && (isLandscape || monitorFullscreen);
+  const effectiveLandscape = orientationLock === "auto" ? isLandscape : orientationLock === "landscape";
+  const monitorIsFullscreen = activeTab === "monitor" && (effectiveLandscape || monitorFullscreen);
 
   const SHOW_IN_CHAT_STATES = new Set(["playing", "error", "idle"]);
 
@@ -332,7 +365,7 @@ function App() {
   );
 
   const handleSelectMovie = useCallback(
-    (url: string, poster?: string) => {
+    (url: string, poster?: string, title?: string) => {
       if (isExternalDisconnected) {
         messages.push({
           type: "chat",
@@ -364,12 +397,28 @@ function App() {
     }
   }, [playingUrl, currentPoster, handleSelectMovie]);
 
-  // Reset poster when state goes idle
+  // Reset poster and orientation lock when state goes idle
   useEffect(() => {
     if (currentState === "idle") {
       setCurrentPoster("");
+      setOrientationLock("auto");
     }
   }, [currentState]);
+
+  // When playing starts: add to history + auto-switch to monitor (in-app)
+  useEffect(() => {
+    if (currentState === "playing") {
+      // Add to history now that movie is confirmed playing
+      if (playingUrl) {
+        window.dispatchEvent(new CustomEvent("streamdesk_history", {
+          detail: { url: playingUrl, poster: currentPoster, title: currentTitle },
+        }));
+      }
+      if (monitorMode === "inapp") {
+        setActiveTab("monitor");
+      }
+    }
+  }, [currentState, monitorMode, playingUrl, currentPoster, currentTitle]);
 
   // Auth loading
   if (authLoading) {
@@ -475,7 +524,7 @@ function App() {
     <div
       className={`panel-monitor${desktopMonitorExpanded ? " desktop-expanded" : ""}`}
       onClick={() => {
-        if (!isDesktop && activeTab === "monitor" && !isLandscape) {
+        if (!isDesktop && activeTab === "monitor" && !effectiveLandscape) {
           setMonitorFullscreen((f) => !f);
         }
       }}
@@ -486,7 +535,7 @@ function App() {
         style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
         allow="autoplay; fullscreen"
       />
-      {isDesktop && (
+      {isDesktop ? (
         <button
           onClick={(e) => { e.stopPropagation(); setDesktopMonitorExpanded((v) => !v); }}
           style={{
@@ -509,6 +558,47 @@ function App() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
               <polyline points="15,3 21,3 21,9" /><polyline points="9,21 3,21 3,15" />
               <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          )}
+        </button>
+      ) : activeTab === "monitor" && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            // Cycle: auto → landscape → portrait → auto
+            setOrientationLock((prev) => {
+              if (prev === "auto") return "landscape";
+              if (prev === "landscape") return "portrait";
+              return "auto";
+            });
+          }}
+          style={{
+            position: "absolute", top: 8, right: 8, zIndex: 210,
+            width: 36, height: 36, borderRadius: 8, border: "none",
+            background: "rgba(0,0,0,0.6)", color: orientationLock === "auto" ? "rgba(255,255,255,0.7)" : "#fff",
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            backdropFilter: "blur(4px)", transition: "opacity 0.2s",
+          }}
+          title={orientationLock === "auto" ? "Auto rotation" : orientationLock === "landscape" ? "Landscape (locked)" : "Portrait (locked)"}
+        >
+          {orientationLock === "landscape" ? (
+            /* Landscape icon — wide rectangle */
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+              <rect x="1" y="5" width="22" height="14" rx="2" />
+              <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          ) : orientationLock === "portrait" ? (
+            /* Portrait icon — tall rectangle */
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+              <rect x="5" y="1" width="14" height="22" rx="2" />
+              <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          ) : (
+            /* Auto rotation icon */
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+              <path d="M21 12a9 9 0 01-9 9m-9-9a9 9 0 019-9" />
+              <polyline points="21,3 21,9 15,9" />
+              <polyline points="3,21 3,15 9,15" />
             </svg>
           )}
         </button>

@@ -11,7 +11,7 @@ interface Props {
   isPlaying?: boolean;
   episodes?: EpisodeInfo[] | null;
   onSelectEpisode?: (index: number) => void;
-  onSelectMovie?: (url: string, poster?: string) => void;
+  onSelectMovie?: (url: string, poster?: string, title?: string) => void;
   thinkingText?: string;
   disabled?: boolean;
 }
@@ -85,7 +85,7 @@ export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, 
     setInput("");
     setSuggestions([]);
     setShowSuggestions(false);
-    onSelectMovie?.(movie.url, movie.poster);
+    onSelectMovie?.(movie.url, movie.poster, movie.title);
   };
 
   return (
@@ -154,7 +154,7 @@ export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, 
                 {msg.recommendations.map((movie, idx) => (
                   <div
                     key={idx}
-                    onClick={() => onSelectMovie?.(movie.url)}
+                    onClick={() => onSelectMovie?.(movie.url, movie.poster, movie.title)}
                     style={{
                       display: "flex",
                       gap: 10,
