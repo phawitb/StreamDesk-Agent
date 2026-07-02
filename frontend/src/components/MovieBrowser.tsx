@@ -253,7 +253,7 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
 
                   {/* Monitor mode */}
                   <div style={{ padding: isWide ? "12px 4px" : "8px 12px" }}>
-                    <div style={{ fontSize: isWide ? 14 : 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 10 : 6 }}>
+                    <div style={{ fontSize: isWide ? 14 : 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 10 : 6 }}>
                       Monitor Mode
                     </div>
                     <div style={{ display: "flex", gap: isWide ? 6 : 4 }}>
@@ -265,10 +265,10 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                             key={mode}
                             onClick={() => onMonitorModeChange?.(mode)}
                             style={{
-                              flex: 1, padding: isWide ? "10px 0" : "7px 0", borderRadius: 6, border: "none",
+                              flex: 1, padding: isWide ? "10px 0" : "9px 0", borderRadius: 6, border: "none",
                               background: active ? "var(--accent)" : "rgba(255,255,255,0.08)",
                               color: active ? "#fff" : "var(--text-secondary)",
-                              fontSize: isWide ? 14 : 11, fontWeight: 600, cursor: "pointer",
+                              fontSize: isWide ? 14 : 13, fontWeight: 600, cursor: "pointer",
                             }}
                           >
                             {labels[mode]}
@@ -276,135 +276,139 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                         );
                       })}
                     </div>
-                    <div style={{ fontSize: isWide ? 12 : 10, color: "var(--text-muted)", marginTop: isWide ? 8 : 4 }}>
-                      {monitorMode === "inapp" && "ดูในแอป — แท็บ Monitor"}
-                      {monitorMode === "device" && "เชื่อมต่อจอ Monitor ด้วย Device Key"}
-                      {monitorMode === "url" && "เปิด URL บนจอใดก็ได้"}
-                    </div>
 
-                    {/* λ-Device mode: device key + QR scan */}
-                    {monitorMode === "device" && (
-                      <div style={{ marginTop: isWide ? 14 : 8 }}>
-                        {pairedDeviceKey ? (
-                          <div>
-                            <div style={{ fontSize: isWide ? 13 : 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
-                              Paired Device
+                    {/* Fixed-height mode detail area */}
+                    <div style={{ minHeight: isWide ? 140 : 120, marginTop: isWide ? 12 : 8 }}>
+                      <div style={{ fontSize: isWide ? 12 : 11, color: "var(--text-muted)", marginBottom: isWide ? 12 : 8 }}>
+                        {monitorMode === "inapp" && "ดูในแอป — แท็บ Monitor"}
+                        {monitorMode === "device" && "เชื่อมต่อจอ Monitor ด้วย Device Key"}
+                        {monitorMode === "url" && "เปิด URL บนจอใดก็ได้"}
+                      </div>
+
+                      {/* λ-Device mode: device key + QR scan */}
+                      {monitorMode === "device" && (
+                        <>
+                          {pairedDeviceKey ? (
+                            <div>
+                              <div style={{ fontSize: isWide ? 13 : 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
+                                Paired Device
+                              </div>
+                              <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
+                                <div style={{
+                                  flex: 1, padding: isWide ? "8px 12px" : "8px 10px", borderRadius: 4,
+                                  border: "1px solid var(--border)", background: "var(--bg-base)",
+                                  color: "var(--text-primary)", fontSize: isWide ? 14 : 13,
+                                  fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis",
+                                }}>
+                                  {pairedDeviceKey}
+                                </div>
+                                <button
+                                  onClick={() => onUnpairDevice?.()}
+                                  style={{
+                                    padding: isWide ? "8px 16px" : "8px 14px", borderRadius: 4, border: "none",
+                                    background: "var(--accent)", color: "#fff",
+                                    fontSize: isWide ? 13 : 12, fontWeight: 600, cursor: "pointer",
+                                    whiteSpace: "nowrap", flexShrink: 0,
+                                  }}
+                                >
+                                  Disconnect
+                                </button>
+                              </div>
                             </div>
-                            <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
-                              <div style={{
-                                flex: 1, padding: isWide ? "8px 12px" : "6px 8px", borderRadius: 4,
-                                border: "1px solid var(--border)", background: "var(--bg-base)",
-                                color: "var(--text-primary)", fontSize: isWide ? 14 : 11,
-                                fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis",
-                              }}>
-                                {pairedDeviceKey}
+                          ) : (
+                            <div>
+                              <div style={{ fontSize: isWide ? 13 : 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
+                                Device Key
+                              </div>
+                              <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
+                                <input
+                                  value={deviceKeyInput}
+                                  onChange={(e) => setDeviceKeyInput(e.target.value)}
+                                  placeholder="Enter device key..."
+                                  style={{
+                                    flex: 1, padding: isWide ? "8px 12px" : "8px 10px", borderRadius: 4,
+                                    border: "1px solid var(--border)", background: "var(--bg-base)",
+                                    color: "var(--text-primary)", fontSize: isWide ? 14 : 13, outline: "none",
+                                    minWidth: 0,
+                                  }}
+                                  onKeyDown={(e) => e.key === "Enter" && handlePair()}
+                                />
+                                <button
+                                  onClick={handlePair}
+                                  disabled={!deviceKeyInput.trim() || pairing}
+                                  style={{
+                                    padding: isWide ? "8px 16px" : "8px 14px", borderRadius: 4, border: "none",
+                                    background: deviceKeyInput.trim() ? "var(--accent)" : "rgba(255,255,255,0.08)",
+                                    color: "#fff", fontSize: isWide ? 13 : 12, fontWeight: 600,
+                                    cursor: deviceKeyInput.trim() ? "pointer" : "default",
+                                    whiteSpace: "nowrap", flexShrink: 0,
+                                  }}
+                                >
+                                  Connect
+                                </button>
                               </div>
                               <button
-                                onClick={() => onUnpairDevice?.()}
+                                onClick={() => setShowQRScanner(true)}
                                 style={{
-                                  padding: isWide ? "8px 16px" : "6px 10px", borderRadius: 4, border: "none",
-                                  background: "var(--accent)", color: "#fff",
-                                  fontSize: isWide ? 13 : 11, fontWeight: 600, cursor: "pointer",
-                                  whiteSpace: "nowrap", flexShrink: 0,
+                                  width: "100%", marginTop: isWide ? 10 : 8, padding: isWide ? "10px 0" : "9px 0",
+                                  borderRadius: 4, border: "1px solid var(--border)",
+                                  background: "transparent", color: "var(--text-secondary)",
+                                  fontSize: isWide ? 13 : 12, fontWeight: 600, cursor: "pointer",
+                                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                                 }}
                               >
-                                Disconnect
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: isWide ? 18 : 16, height: isWide ? 18 : 16 }}>
+                                  <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+                                  <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+                                </svg>
+                                Scan QR Code
                               </button>
                             </div>
+                          )}
+                        </>
+                      )}
+
+                      {/* URL mode: show monitor URL */}
+                      {monitorMode === "url" && monitorToken && (
+                        <div>
+                          <div style={{ fontSize: isWide ? 13 : 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
+                            Monitor URL
                           </div>
-                        ) : (
-                          <div>
-                            <div style={{ fontSize: isWide ? 13 : 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
-                              Device Key
-                            </div>
-                            <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
-                              <input
-                                value={deviceKeyInput}
-                                onChange={(e) => setDeviceKeyInput(e.target.value)}
-                                placeholder="Enter device key..."
-                                style={{
-                                  flex: 1, padding: isWide ? "8px 12px" : "6px 8px", borderRadius: 4,
-                                  border: "1px solid var(--border)", background: "var(--bg-base)",
-                                  color: "var(--text-primary)", fontSize: isWide ? 14 : 11, outline: "none",
-                                  minWidth: 0,
-                                }}
-                                onKeyDown={(e) => e.key === "Enter" && handlePair()}
-                              />
-                              <button
-                                onClick={handlePair}
-                                disabled={!deviceKeyInput.trim() || pairing}
-                                style={{
-                                  padding: isWide ? "8px 16px" : "6px 10px", borderRadius: 4, border: "none",
-                                  background: deviceKeyInput.trim() ? "var(--accent)" : "rgba(255,255,255,0.08)",
-                                  color: "#fff", fontSize: isWide ? 13 : 11, fontWeight: 600,
-                                  cursor: deviceKeyInput.trim() ? "pointer" : "default",
-                                  whiteSpace: "nowrap", flexShrink: 0,
-                                }}
-                              >
-                                Connect
-                              </button>
-                            </div>
-                            <button
-                              onClick={() => setShowQRScanner(true)}
+                          <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
+                            <input
+                              readOnly
+                              value={`${window.location.origin}/m/${monitorToken}`}
                               style={{
-                                width: "100%", marginTop: isWide ? 10 : 6, padding: isWide ? "10px 0" : "7px 0",
-                                borderRadius: 4, border: "1px solid var(--border)",
-                                background: "transparent", color: "var(--text-secondary)",
-                                fontSize: isWide ? 13 : 11, fontWeight: 600, cursor: "pointer",
-                                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                flex: 1, padding: isWide ? "8px 12px" : "8px 10px", borderRadius: 4,
+                                border: "1px solid var(--border)", background: "var(--bg-base)",
+                                color: "var(--text-primary)", fontSize: isWide ? 14 : 13, outline: "none",
+                                minWidth: 0,
+                              }}
+                              onClick={(e) => (e.target as HTMLInputElement).select()}
+                            />
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(`${window.location.origin}/m/${monitorToken}`).then(() => {
+                                  setCopied(true);
+                                  setTimeout(() => setCopied(false), 2000);
+                                });
+                              }}
+                              style={{
+                                padding: isWide ? "8px 16px" : "8px 14px", borderRadius: 4, border: "none",
+                                background: copied ? "#46D369" : "var(--accent)",
+                                color: "#fff", fontSize: isWide ? 13 : 12, fontWeight: 600,
+                                cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
                               }}
                             >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: isWide ? 18 : 14, height: isWide ? 18 : 14 }}>
-                                <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
-                                <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
-                              </svg>
-                              Scan QR Code
+                              {copied ? "Copied!" : "Copy"}
                             </button>
                           </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* URL mode: show monitor URL */}
-                    {monitorMode === "url" && monitorToken && (
-                      <div style={{ marginTop: isWide ? 14 : 8 }}>
-                        <div style={{ fontSize: isWide ? 13 : 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: isWide ? 6 : 4 }}>
-                          Monitor URL
+                          <div style={{ fontSize: isWide ? 12 : 11, color: "var(--text-muted)", marginTop: isWide ? 6 : 4 }}>
+                            เปิด URL นี้บนจอ Monitor ใดก็ได้
+                          </div>
                         </div>
-                        <div style={{ display: "flex", gap: isWide ? 8 : 6, alignItems: "center" }}>
-                          <input
-                            readOnly
-                            value={`${window.location.origin}/m/${monitorToken}`}
-                            style={{
-                              flex: 1, padding: isWide ? "8px 12px" : "6px 8px", borderRadius: 4,
-                              border: "1px solid var(--border)", background: "var(--bg-base)",
-                              color: "var(--text-primary)", fontSize: isWide ? 14 : 11, outline: "none",
-                              minWidth: 0,
-                            }}
-                            onClick={(e) => (e.target as HTMLInputElement).select()}
-                          />
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(`${window.location.origin}/m/${monitorToken}`).then(() => {
-                                setCopied(true);
-                                setTimeout(() => setCopied(false), 2000);
-                              });
-                            }}
-                            style={{
-                              padding: isWide ? "8px 16px" : "6px 10px", borderRadius: 4, border: "none",
-                              background: copied ? "#46D369" : "var(--accent)",
-                              color: "#fff", fontSize: isWide ? 13 : 11, fontWeight: 600,
-                              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-                            }}
-                          >
-                            {copied ? "Copied!" : "Copy"}
-                          </button>
-                        </div>
-                        <div style={{ fontSize: isWide ? 12 : 10, color: "var(--text-muted)", marginTop: isWide ? 6 : 4 }}>
-                          เปิด URL นี้บนจอ Monitor ใดก็ได้
-                        </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               </>
