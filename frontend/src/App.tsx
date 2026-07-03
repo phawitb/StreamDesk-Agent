@@ -237,7 +237,7 @@ function App() {
   }, []);
 
   const effectiveLandscape = orientationLock === "auto" ? isLandscape : orientationLock === "landscape";
-  const monitorIsFullscreen = activeTab === "monitor" && (effectiveLandscape || monitorFullscreen);
+  const monitorIsFullscreen = !isDesktop && activeTab === "monitor" && (effectiveLandscape || monitorFullscreen);
 
   const SHOW_IN_CHAT_STATES = new Set(["playing", "error", "idle"]);
 
@@ -645,7 +645,7 @@ function App() {
 
       {!keyboardVisible && (
         <div className="now-playing-bar">
-          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} onReplay={playingUrl ? handleReplay : undefined} />
+          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} statusText={thinkingText} onReplay={playingUrl ? handleReplay : undefined} />
         </div>
       )}
 

@@ -8,6 +8,7 @@ interface Props {
   isPlaying?: boolean;
   monitorMode?: "inapp" | "device" | "url";
   currentState?: AgentState;
+  statusText?: string;
   onReplay?: () => void;
 }
 
@@ -30,7 +31,7 @@ function formatTime(seconds: number): string {
 
 const WAITING_STATES = new Set<string>(["launching", "navigating", "loading_player"]);
 
-export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", onReplay }: Props) {
+export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", statusText, onReplay }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: false, volume: 50, muted: false });
   const [displayTime, setDisplayTime] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -116,7 +117,7 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
       displayText = title || "Now Playing";
     }
   } else if (isWaiting) {
-    displayText = <span className="np-waiting">Waiting...</span>;
+    displayText = <span className="np-waiting">{statusText || "Waiting..."}</span>;
   } else {
     displayText = "Not Playing";
   }
@@ -170,7 +171,7 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
         </div>
 
         {/* Title + time */}
-        <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="np-title" style={{ minWidth: 0, flex: 1 }}>
           <div
             ref={titleRef}
             style={{
@@ -188,7 +189,7 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
         </div>
 
         {/* Controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+        <div className="np-controls" style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
           {/* Backward |< */}
           <button onClick={() => active && onMediaControl("seek_backward", 10)} disabled={!active} style={controlBtn(active)}>
             <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
@@ -206,11 +207,11 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
                 onReplay();
               }
             }}
-            disabled={!active && !onReplay}
+            disabled={!active && (!onReplay || isWaiting)}
             style={{
               width: 36, height: 36, borderRadius: "50%", border: "none",
-              background: (active || onReplay) ? "#fff" : "rgba(255,255,255,0.15)",
-              color: "var(--bg-base)", cursor: (active || onReplay) ? "pointer" : "default",
+              background: (active || (onReplay && !isWaiting)) ? "#fff" : "rgba(255,255,255,0.15)",
+              color: "var(--bg-base)", cursor: (active || (onReplay && !isWaiting)) ? "pointer" : "default",
               display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
             }}
           >
@@ -281,6 +282,9 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
         @keyframes npBlink {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
+        }
+        @media (min-width: 769px) {
+          .np-controls { order: -1; }
         }
       `}</style>
     </div>
