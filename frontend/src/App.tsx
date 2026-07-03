@@ -157,46 +157,18 @@ function App() {
     document.addEventListener("touchend", onUp);
   }, []);
 
-  // Detect landscape orientation (only when not locked)
-  const orientationLockRef = useRef(orientationLock);
-  orientationLockRef.current = orientationLock;
+  // Orientation lock via button only (no sensor)
   useEffect(() => {
-    const checkOrientation = () => {
-      if (orientationLockRef.current === "auto") {
-        setIsLandscape(window.innerWidth > window.innerHeight);
+    setIsLandscape(orientationLock === "landscape");
+    if (orientationLock === "auto" || orientationLock === "portrait") {
+      setMonitorFullscreen(false);
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    } else if (orientationLock === "landscape") {
+      // Enter fullscreen for landscape
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => {});
       }
-    };
-    checkOrientation();
-    window.addEventListener("resize", checkOrientation);
-    return () => window.removeEventListener("resize", checkOrientation);
-  }, []);
-
-  // Lock/unlock screen orientation via API
-  useEffect(() => {
-    const so = screen?.orientation;
-    if (!so?.lock) return;
-    if (orientationLock === "auto") {
-      so.unlock?.();
-      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-    } else {
-      const lockOrientation = async () => {
-        try {
-          // Some browsers require fullscreen to lock orientation
-          if (!document.fullscreenElement) {
-            await document.documentElement.requestFullscreen?.().catch(() => {});
-          }
-          await so.lock(orientationLock === "landscape" ? "landscape" : "portrait");
-        } catch {
-          // Fallback: at least set isLandscape based on lock
-          setIsLandscape(orientationLock === "landscape");
-        }
-      };
-      lockOrientation();
     }
-    return () => {
-      so.unlock?.();
-      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-    };
   }, [orientationLock]);
 
   // Save watch progress from media_status events
@@ -415,7 +387,7 @@ function App() {
         }));
       }
       if (monitorMode === "inapp") {
-        setActiveTab("monitor");
+        setActiveTab("chat");
       }
     }
   }, [currentState, monitorMode, playingUrl, currentPoster, currentTitle]);
