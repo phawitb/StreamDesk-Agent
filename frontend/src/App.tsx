@@ -11,12 +11,15 @@ import "./App.css";
 
 function App() {
   const { user, loading: authLoading, login, logout } = useAuth();
-  const { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, send } = useWebSocket();
+  const { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, addMessage, send } = useWebSocket();
   const { canInstall, install } = usePWAInstall();
-  const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">("browse");
+  const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">(() => {
+    const s = sessionStorage.getItem("activeTab");
+    return (s === "browse" || s === "chat" || s === "monitor") ? s : "browse";
+  });
   const [forceInstall, setForceInstall] = useState(true);
-  const [currentPoster, setCurrentPoster] = useState("");
-  const [playingUrl, setPlayingUrl] = useState("");
+  const [currentPoster, setCurrentPoster] = useState(() => sessionStorage.getItem("currentPoster") || "");
+  const [playingUrl, setPlayingUrl] = useState(() => sessionStorage.getItem("playingUrl") || "");
   const [monitorMode, setMonitorMode] = useState<"inapp" | "device" | "url">(() => {
     const stored = localStorage.getItem("monitorMode");
     if (stored === "inapp" || stored === "device" || stored === "url") return stored;
@@ -105,6 +108,27 @@ function App() {
   const handleFontScaleChange = useCallback((scale: number) => {
     setFontScale(scale);
     localStorage.setItem("fontScale", String(scale));
+  }, []);
+
+  // Persist UI state to sessionStorage (survives back-gesture app restart)
+  useEffect(() => { sessionStorage.setItem("activeTab", activeTab); }, [activeTab]);
+  useEffect(() => { sessionStorage.setItem("playingUrl", playingUrl); }, [playingUrl]);
+  useEffect(() => { sessionStorage.setItem("currentPoster", currentPoster); }, [currentPoster]);
+
+  // Trap back button / edge swipe — push history so popstate never exits app
+  useEffect(() => {
+    history.replaceState({ guard: true }, "");
+    for (let i = 0; i < 50; i++) history.pushState({ guard: true }, "");
+    const onPopState = () => {
+      const tab = activeTabRef.current;
+      setActiveTab(tab === "browse" ? "chat" : "browse");
+      requestAnimationFrame(() => {
+        setActiveTab(tab);
+        for (let i = 0; i < 10; i++) history.pushState({ guard: true }, "");
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
   // Detect desktop vs mobile
@@ -289,9 +313,11 @@ function App() {
     (index: number) => {
       send({ type: "select_episode", index });
       const ep = episodes?.find((e) => e.index === index);
-      messages.push({ type: "chat", role: "user", content: `เลือก ${ep?.text || `ตอนที่ ${index + 1}`}` });
+      addMessage({ type: "chat", role: "user", content: `เลือก ${ep?.text || `ตอนที่ ${index + 1}`}` });
+      // Add loading status to clear episode picker immediately
+      addMessage({ type: "status", state: "loading_player", message: "กำลังโหลด...", timestamp: new Date().toISOString() } as any);
     },
-    [send, messages, episodes]
+    [send, addMessage, episodes]
   );
 
   const handleMediaControl = useCallback(
@@ -305,8 +331,8 @@ function App() {
     (text: string) => {
       const isUrl = text.startsWith("http://") || text.startsWith("https://");
       if (isUrl && isExternalDisconnected) {
-        messages.push({ type: "chat", role: "user", content: text });
-        messages.push({
+        addMessage({ type: "chat", role: "user", content: text });
+        addMessage({
           type: "chat",
           role: "assistant",
           content: "โปรดเชื่อมต่อจอก่อน หรือปรับเป็นโหมด In-App (Settings > Monitor Mode)",
@@ -323,8 +349,7 @@ function App() {
       } else {
         send({ type: "play_request", query: text });
       }
-      messages.push({ type: "chat", role: "user", content: text });
-      // Extract YouTube/Bilibili thumbnail
+      addMessage({ type: "chat", role: "user", content: text });
       if (isUrl) {
         const ytMatch = text.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
         if (ytMatch) {
@@ -333,13 +358,13 @@ function App() {
       }
       setActiveTab("chat");
     },
-    [send, messages, isExternalDisconnected]
+    [send, addMessage, isExternalDisconnected]
   );
 
   const handleSelectMovie = useCallback(
     (url: string, poster?: string, title?: string) => {
       if (isExternalDisconnected) {
-        messages.push({
+        addMessage({
           type: "chat",
           role: "assistant",
           content: "โปรดเชื่อมต่อจอก่อน หรือปรับเป็นโหมด In-App (Settings > Monitor Mode)",
@@ -352,11 +377,11 @@ function App() {
       const resumePos = saved?.currentTime && saved?.duration && saved.currentTime < saved.duration - 10 ? saved.currentTime : 0;
       send({ type: "play_request", url, resume_position: resumePos });
       setPlayingUrl(url);
-      messages.push({ type: "chat", role: "user", content: url });
+      addMessage({ type: "chat", role: "user", content: url });
       if (poster) setCurrentPoster(poster);
       setActiveTab("chat");
     },
-    [send, messages, isExternalDisconnected]
+    [send, addMessage, isExternalDisconnected]
   );
 
   const isPlaying = currentState === "playing";
@@ -377,17 +402,26 @@ function App() {
     }
   }, [currentState]);
 
-  // When playing starts: add to history + auto-switch to monitor (in-app)
+  // Auto-switch to chat when episodes appear
   useEffect(() => {
-    if (currentState === "playing") {
-      // Add to history now that movie is confirmed playing
+    if (episodes && episodes.length > 0) {
+      setActiveTab("chat");
+    }
+  }, [episodes]);
+
+  // Auto-switch tabs based on state
+  useEffect(() => {
+    if (currentState === "launching" || currentState === "navigating" || currentState === "loading_player") {
+      setActiveTab("chat");
+    } else if (currentState === "playing") {
+      // Ready — add to history + switch to monitor
       if (playingUrl) {
         window.dispatchEvent(new CustomEvent("streamdesk_history", {
           detail: { url: playingUrl, poster: currentPoster, title: currentTitle },
         }));
       }
       if (monitorMode === "inapp") {
-        setActiveTab("chat");
+        setActiveTab("monitor");
       }
     }
   }, [currentState, monitorMode, playingUrl, currentPoster, currentTitle]);

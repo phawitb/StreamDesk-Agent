@@ -153,11 +153,20 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
 
       {/* Main controls row */}
       <div style={{ display: "flex", alignItems: "center", flex: 1, padding: "0 12px", gap: 8 }}>
-        {/* Poster thumbnail */}
-        <div style={{
-          width: 40, height: 40, borderRadius: 4, overflow: "hidden", flexShrink: 0,
-          background: "var(--bg-elevated)",
-        }}>
+        {/* Poster thumbnail with play/pause overlay */}
+        <div
+          style={{
+            width: 40, height: 40, borderRadius: 4, overflow: "hidden", flexShrink: 0,
+            background: "var(--bg-elevated)", position: "relative", cursor: (active || (onReplay && !isWaiting)) ? "pointer" : "default",
+          }}
+          onClick={() => {
+            if (active) {
+              onMediaControl(status.paused ? "resume" : "pause");
+            } else if (onReplay && !isWaiting && title) {
+              onReplay();
+            }
+          }}
+        >
           {poster ? (
             <img src={poster} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           ) : (
@@ -166,6 +175,19 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
                 <rect x="2" y="3" width="20" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" />
                 <path d="M10 8v8l6-4-6-4z" fill="currentColor" opacity="0.5" />
               </svg>
+            </div>
+          )}
+          {(active || (onReplay && !isWaiting)) && (
+            <div style={{
+              position: "absolute", inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {!active || status.paused ? (
+                <svg viewBox="0 0 24 24" fill="#fff" style={{ width: 18, height: 18, marginLeft: 2 }}><path d="M8 5v14l11-7z" /></svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="#fff" style={{ width: 18, height: 18 }}><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+              )}
             </div>
           )}
         </div>
@@ -190,7 +212,6 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
 
         {/* Controls */}
         <div className="np-controls" style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          {/* Backward |< */}
           <button onClick={() => active && onMediaControl("seek_backward", 10)} disabled={!active} style={controlBtn(active)}>
             <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
               <rect x="4" y="5" width="2.5" height="14" rx="0.5" />
@@ -198,31 +219,6 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
             </svg>
           </button>
 
-          {/* Play/Pause */}
-          <button
-            onClick={() => {
-              if (active) {
-                onMediaControl(status.paused ? "resume" : "pause");
-              } else if (onReplay && title) {
-                onReplay();
-              }
-            }}
-            disabled={!active && (!onReplay || isWaiting)}
-            style={{
-              width: 36, height: 36, borderRadius: "50%", border: "none",
-              background: (active || (onReplay && !isWaiting)) ? "#fff" : "rgba(255,255,255,0.15)",
-              color: "var(--bg-base)", cursor: (active || (onReplay && !isWaiting)) ? "pointer" : "default",
-              display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
-            }}
-          >
-            {!active || status.paused ? (
-              <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16, marginLeft: 2 }}><path d="M8 5v14l11-7z" /></svg>
-            ) : (
-              <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-            )}
-          </button>
-
-          {/* Forward >| */}
           <button onClick={() => active && onMediaControl("seek_forward", 10)} disabled={!active} style={controlBtn(active)}>
             <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
               <path d="M4 5l12 7-12 7V5z" />

@@ -10,7 +10,12 @@ export function useWebSocket() {
   const [monitorInConnected, setMonitorInConnected] = useState(false);
   const [monitorOutConnected, setMonitorOutConnected] = useState(false);
   const [pairedDevice, setPairedDevice] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ServerMessage[]>([]);
+  const [messages, setMessages] = useState<ServerMessage[]>(() => {
+    try {
+      const saved = sessionStorage.getItem("ws_messages");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const connect = useCallback(() => {
@@ -40,7 +45,11 @@ export function useWebSocket() {
           return;
         }
         const msg: ServerMessage = data;
-        setMessages((prev) => [...prev, msg]);
+        setMessages((prev) => {
+          const next = [...prev, msg];
+          try { sessionStorage.setItem("ws_messages", JSON.stringify(next.slice(-50))); } catch {}
+          return next;
+        });
       } catch (e) {
         console.error("Failed to parse message:", e);
       }
@@ -74,5 +83,13 @@ export function useWebSocket() {
     }
   }, []);
 
-  return { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, send };
+  const addMessage = useCallback((msg: ServerMessage) => {
+    setMessages((prev) => {
+      const next = [...prev, msg];
+      try { sessionStorage.setItem("ws_messages", JSON.stringify(next.slice(-50))); } catch {}
+      return next;
+    });
+  }, []);
+
+  return { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, addMessage, send };
 }
