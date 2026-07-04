@@ -425,7 +425,7 @@ class AgentManager:
             logger.info("Cached stream expired for ep=%d", episode_index)
             return False
 
-    async def play_youtube_search(self, search_query: str):
+    async def play_youtube_search(self, search_query: str, user_email: str = ""):
         """Search YouTube and play the top result."""
         await self._report("launching", f"กำลังค้นหา YouTube: {search_query}...")
         if not self._monitor.connected:
@@ -453,6 +453,10 @@ class AgentManager:
             await self._report("loading_player", f"กำลังเปิด: {title}...")
             await self._monitor.open_url(stream_url, title)
             await self._report("playing", f"กำลังเล่น: {title}")
+            # Log to watch history
+            if user_email:
+                from app.services.database import log_watch_enhanced
+                asyncio.create_task(log_watch_enhanced(user_email, f"youtube:{search_query}", title=title))
         except asyncio.TimeoutError:
             await self._report("error", "YouTube search timeout")
         except Exception as e:

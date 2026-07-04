@@ -659,7 +659,13 @@ async def _handle_recommendation(query: str, user_id: int | None = None):
             search_query = intent_result.get("search_query", query)
             if message:
                 await broadcast(ChatMessage(content=message).model_dump(), user_id)
-            task = asyncio.create_task(agent_manager.play_youtube_search(search_query))
+            # Get user email for history logging
+            user_email = ""
+            if user_id:
+                user = await get_user_by_id(user_id)
+                if user:
+                    user_email = user["email"]
+            task = asyncio.create_task(agent_manager.play_youtube_search(search_query, user_email=user_email))
             _play_tasks[user_id] = task
             return
 
