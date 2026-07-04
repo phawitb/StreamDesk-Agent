@@ -168,7 +168,7 @@
    Desktop (>768px landscape): two-column layout
    Left = Browse, Right = Monitor + Chat
    ══════════════════════════════════════ */
-@media (min-width: 769px) {
+@media (min-width: 769px) and (orientation: landscape) {
   /* All panels always visible on desktop */
   .panel-browse.hidden-mobile,
   .panel-chat.hidden-mobile,

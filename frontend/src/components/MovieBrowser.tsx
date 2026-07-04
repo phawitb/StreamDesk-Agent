@@ -92,7 +92,12 @@ function formatTimeAgo(ts: number | string): string {
 }
 
 export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected, user, onLogout, isAdmin, fontScale = 1, onFontScaleChange, forceInstall, onForceInstallChange }: Props) {
-  const isWide = typeof window !== "undefined" && window.innerWidth > 768;
+  const [isWide, setIsWide] = useState(() => typeof window !== "undefined" && window.innerWidth > 768 && window.innerWidth > window.innerHeight);
+  useEffect(() => {
+    const check = () => setIsWide(window.innerWidth > 768 && window.innerWidth > window.innerHeight);
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
   const [movies, setMovies] = useState<Movie[]>([]);
   const [recentMovies, setRecentMovies] = useState<Movie[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -1415,11 +1420,18 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
         div::-webkit-scrollbar { height: 0; width: 0; }
         .movie-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(130px, 170px));
-          justify-content: start;
+          grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
           gap: 12px;
         }
         @media (max-width: 768px) {
+          .movie-grid {
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 6px !important;
+            padding-left: 6px !important;
+            padding-right: 6px !important;
+          }
+        }
+        @media (min-width: 769px) and (orientation: portrait) {
           .movie-grid {
             grid-template-columns: repeat(3, 1fr) !important;
             gap: 6px !important;
