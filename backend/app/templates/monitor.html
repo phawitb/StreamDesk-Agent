@@ -370,11 +370,14 @@
                 }, { once: true });
             }
 
-            videoPlayer.play().catch(e => {
+            videoPlayer.play().then(() => {
+                updateMediaSession();
+            }).catch(e => {
                 console.error('Autoplay blocked, trying muted:', e.message);
                 // Fallback: play muted, then unmute on first user interaction
                 videoPlayer.muted = true;
                 videoPlayer.play().then(() => {
+                    updateMediaSession();
                     showToast('Tap screen to unmute');
                     const unmute = () => {
                         videoPlayer.muted = isMuted;
@@ -385,6 +388,28 @@
                 }).catch(() => {
                     showToast('Tap screen to start playback');
                 });
+            });
+        }
+
+        // ── Media Session API (background audio + lock screen controls) ──
+
+        function updateMediaSession() {
+            if (!('mediaSession' in navigator)) return;
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: currentMediaTitle || 'StreamDesk',
+                artist: '',
+                album: 'StreamDesk',
+            });
+            navigator.mediaSession.setActionHandler('play', () => { doPlay(); });
+            navigator.mediaSession.setActionHandler('pause', () => { doPause(); });
+            navigator.mediaSession.setActionHandler('seekbackward', () => {
+                videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 10);
+            });
+            navigator.mediaSession.setActionHandler('seekforward', () => {
+                videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + 10);
+            });
+            navigator.mediaSession.setActionHandler('seekto', (details) => {
+                if (details.seekTime != null) videoPlayer.currentTime = details.seekTime;
             });
         }
 
@@ -492,6 +517,14 @@
                 volume: currentVolume, muted: isMuted,
                 duration, position,
             }));
+            // Update lock screen progress
+            if ('mediaSession' in navigator && duration > 0) {
+                navigator.mediaSession.setPositionState({
+                    duration: duration,
+                    playbackRate: videoPlayer.playbackRate || 1,
+                    position: Math.min(position, duration),
+                });
+            }
         }
         setInterval(reportStatus, 1000);
 
