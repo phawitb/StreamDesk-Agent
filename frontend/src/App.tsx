@@ -5,6 +5,7 @@ import { usePWAInstall } from "./hooks/usePWAInstall";
 import { ChatWindow } from "./components/ChatWindow";
 import { MovieBrowser } from "./components/MovieBrowser";
 import { MediaControls } from "./components/MediaControls";
+import { InAppPlayer } from "./components/InAppPlayer";
 import { saveLastEpisode } from "./components/EpisodePicker";
 import { LoginScreen } from "./components/LoginScreen";
 import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage } from "./types/messages";
@@ -598,10 +599,8 @@ function App() {
       }}
       style={{ position: "relative" }}
     >
-      <iframe
-        src="/monitorin"
-        style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
-        allow="autoplay; fullscreen"
+      <InAppPlayer
+        style={{ pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
       />
       {isDesktop ? (
         <button
