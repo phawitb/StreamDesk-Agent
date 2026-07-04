@@ -2,6 +2,7 @@
 .app {
   display: flex;
   flex-direction: column;
+  height: 100vh;
   height: 100dvh;
   background: var(--bg-base);
 }
@@ -66,8 +67,8 @@
   flex-shrink: 0;
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
-  height: var(--bottom-nav-height);
-  padding-bottom: env(safe-area-inset-bottom);
+  min-height: var(--bottom-nav-height);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .bottom-nav-item {
@@ -152,8 +153,19 @@
   }
 }
 
+/* iPad portrait: mobile layout even though width > 768 */
+@media (min-width: 769px) and (orientation: portrait) {
+  .bottom-nav { display: flex; }
+  .panel-chat { width: 100%; flex: 1; border-left: none; min-height: 0; }
+  .panel-browse { flex: 1; min-height: 0; }
+  .main-content { flex-direction: column; min-height: 0; }
+  .hidden-mobile { display: none; }
+  .panel-monitor { flex: 1; min-height: 0; }
+  .now-playing-bar { height: 56px; }
+}
+
 /* ══════════════════════════════════════
-   Desktop (>768px): two-column layout
+   Desktop (>768px landscape): two-column layout
    Left = Browse, Right = Monitor + Chat
    ══════════════════════════════════════ */
 @media (min-width: 769px) {

@@ -145,41 +145,75 @@ class HD24Agent(BaseSiteAgent):
         """Detect episode buttons on series pages and ask the user to choose."""
         try:
             episodes = await self.page.evaluate("""() => {
+                const epRegex = /EP[.\s]*\d|ตอนที่|ตอน\s*\d|ep\s*\d/i;
                 const buttons = document.querySelectorAll('.swicth-ep');
-                const eps = Array.from(buttons).map((btn, i) => ({
-                    index: i,
-                    text: btn.innerText.trim(),
-                    active: btn.classList.contains('active'),
-                }));
-                // Check if any button text looks like an episode (EP., ตอนที่, etc.)
-                const hasEpText = eps.some(e =>
-                    /EP[.\s]*\d|ตอนที่|ตอน\s*\d|ep\s*\d/i.test(e.text)
-                );
-                return hasEpText ? eps : [];
+                // Only include buttons whose text matches episode pattern
+                const eps = Array.from(buttons)
+                    .filter(btn => epRegex.test(btn.innerText.trim()))
+                    .map((btn, i) => ({
+                        index: i,
+                        text: btn.innerText.trim(),
+                        active: btn.classList.contains('active'),
+                    }));
+                return eps;
             }""")
 
             if not episodes or len(episodes) < 2:
                 return  # Not a series page, continue normally
 
             logger.info("Found %d episodes", len(episodes))
-            await self._report("navigating", f"พบ {len(episodes)} ตอน กำลังรอเลือกตอน...")
+
+            # Save episode list to DB for future use
+            from app.services.database import save_episode_cache
+            page_url = self._manager._current_url or self.page.url if self._manager else self.page.url
+            asyncio.create_task(save_episode_cache(page_url, episodes))
 
             if not self._manager:
                 logger.warning("No manager reference, cannot ask for episode selection")
                 return
 
-            selected = await self._manager.wait_for_episode_selection(episodes)
-            logger.info("User selected episode index: %d", selected)
+            # If episode was pre-selected (from cached episode list), use it directly
+            if self._manager._preselected_episode is not None:
+                selected = self._manager._preselected_episode
+                self._manager._preselected_episode = None
+                logger.info("Using preselected episode index: %d", selected)
+            else:
+                await self._report("navigating", f"พบ {len(episodes)} ตอน กำลังรอเลือกตอน...")
+                selected = await self._manager.wait_for_episode_selection(episodes)
+                logger.info("User selected episode index: %d", selected)
 
-            # Click the selected episode button
+            # Track episode index on manager
+            self._manager._current_episode_index = selected
+
+            # Check stream cache for this episode
+            from app.services.database import get_cached_stream, delete_stream_cache
+            cached = await get_cached_stream(page_url, episode_index=selected)
+            if cached:
+                await self._report("navigating", "พบ stream URL ที่เคยเล่น กำลังทดสอบ...")
+                if await self._manager._test_m3u8_url(cached):
+                    logger.info("Using cached stream for ep %d: %s", selected, cached[:120])
+                    self._manager._use_cached_stream = True
+                    self._manager._cached_stream_url = cached
+                    ep_text = episodes[selected]["text"] if selected < len(episodes) else ""
+                    await self._report("navigating", f"เลือก {ep_text or f'#{selected}'} แล้ว (จาก cache)")
+                    return  # Skip clicking episode button — use cached stream
+                else:
+                    await delete_stream_cache(page_url, episode_index=selected)
+                    logger.info("Cached stream for ep %d expired", selected)
+
+            # Click by matching text to avoid index mismatch if DOM changed
+            ep_text = episodes[selected]["text"] if selected < len(episodes) else ""
             await self.page.evaluate(f"""() => {{
-                const buttons = document.querySelectorAll('.swicth-ep');
-                if (buttons[{selected}]) buttons[{selected}].click();
+                const epRegex = /EP[.\\s]*\\d|ตอนที่|ตอน\\s*\\d|ep\\s*\\d/i;
+                const buttons = Array.from(document.querySelectorAll('.swicth-ep'))
+                    .filter(btn => epRegex.test(btn.innerText.trim()));
+                const target = buttons.find(b => b.innerText.trim() === {repr(ep_text)});
+                if (target) target.click();
+                else if (buttons[{selected}]) buttons[{selected}].click();
             }}""")
             await self.page.wait_for_timeout(3000)
 
-            ep_text = episodes[selected]["text"] if selected < len(episodes) else f"#{selected}"
-            await self._report("navigating", f"เลือก {ep_text} แล้ว")
+            await self._report("navigating", f"เลือก {ep_text or f'#{selected}'} แล้ว")
 
         except Exception as e:
             logger.warning("Episode detection error: %s", e)
@@ -221,13 +255,31 @@ class HD24Agent(BaseSiteAgent):
         return None
 
     async def _switch_to_backup(self):
-        """Click the backup player button."""
+        """Click the backup player/server button (skip episode buttons)."""
         try:
-            buttons = self.page.locator(".swicth-ep, .switch-ep")
-            count = await buttons.count()
-            if count >= 2:
-                await buttons.nth(1).click()
+            # Find non-episode .swicth-ep buttons (server/source tabs only)
+            server_index = await self.page.evaluate("""() => {
+                const epRegex = /EP[.\\s]*\\d|ตอนที่|ตอน\\s*\\d|ep\\s*\\d/i;
+                const buttons = document.querySelectorAll('.swicth-ep, .switch-ep');
+                // Find indices of non-episode buttons (server tabs)
+                const serverIndices = [];
+                buttons.forEach((btn, i) => {
+                    if (!epRegex.test(btn.innerText.trim())) {
+                        serverIndices.push(i);
+                    }
+                });
+                // Click the second server tab (first backup) if available
+                if (serverIndices.length >= 2) return serverIndices[1];
+                // If only one non-episode button, try it
+                if (serverIndices.length === 1) return serverIndices[0];
+                return -1;
+            }""")
+            if server_index >= 0:
+                buttons = self.page.locator(".swicth-ep, .switch-ep")
+                await buttons.nth(server_index).click()
                 await self.page.wait_for_timeout(3000)
+            else:
+                logger.info("No server/backup buttons found (only episode buttons)")
         except Exception as e:
             logger.warning("Failed to switch to backup: %s", e)
 

@@ -10,6 +10,7 @@ interface Props {
   currentState?: AgentState;
   statusText?: string;
   onReplay?: () => void;
+  onReload?: () => void;
 }
 
 interface MediaStatus {
@@ -31,7 +32,7 @@ function formatTime(seconds: number): string {
 
 const WAITING_STATES = new Set<string>(["launching", "navigating", "loading_player"]);
 
-export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", statusText, onReplay }: Props) {
+export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", statusText, onReplay, onReload }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: false, volume: 50, muted: false });
   const [displayTime, setDisplayTime] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -43,6 +44,11 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
 
   const isWaiting = WAITING_STATES.has(currentState);
   const active = !!isPlaying;
+  const stuckCheckRef = useRef<ReturnType<typeof setTimeout>>();
+  const resumeTimeRef = useRef(0);
+  const latestTimeRef = useRef(0);
+  const onReplayRef = useRef(onReplay);
+  onReplayRef.current = onReplay;
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -62,6 +68,7 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
         if (ct === 0 && dur === 0 && status.duration > 0) return;
         setStatus({ currentTime: ct, duration: dur, paused: data.paused ?? false, volume: data.volume ?? 50, muted: data.muted ?? false });
         setDisplayTime(ct);
+        latestTimeRef.current = ct;
       }
     };
     window.addEventListener("media_status" as any, handler as any);
@@ -89,6 +96,21 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
     el.style.overflow = prev;
     setNeedsMarquee(overflows);
   }, [title, isPlaying]);
+
+  // Detect stuck stream after resume — if time doesn't change in 9s, auto-reopen
+  // Only starts once; pressing play again while timer is running does NOT reset it
+  const checkStuck = useCallback(() => {
+    if (stuckCheckRef.current) return; // Already checking, don't reset
+    resumeTimeRef.current = latestTimeRef.current;
+    stuckCheckRef.current = setTimeout(() => {
+      stuckCheckRef.current = undefined;
+      if (latestTimeRef.current === resumeTimeRef.current && onReplayRef.current) {
+        onReplayRef.current();
+      }
+    }, 9000);
+  }, []);
+
+  useEffect(() => () => clearTimeout(stuckCheckRef.current), []);
 
   const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setDragTime(parseFloat(e.target.value));
@@ -161,7 +183,13 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
           }}
           onClick={() => {
             if (active) {
-              onMediaControl(status.paused ? "resume" : "pause");
+              if (status.paused) {
+                onMediaControl("resume");
+                checkStuck();
+              } else {
+                onMediaControl("pause");
+                clearTimeout(stuckCheckRef.current);
+              }
             } else if (onReplay && !isWaiting && title) {
               onReplay();
             }
@@ -225,6 +253,14 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
               <rect x="17.5" y="5" width="2.5" height="14" rx="0.5" />
             </svg>
           </button>
+
+          {onReload && !isWaiting && (
+            <button onClick={onReload} style={controlBtn(true)} title="Reload stream">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              </svg>
+            </button>
+          )}
 
           {/* Volume remote — external monitor only */}
           {monitorMode !== "inapp" && controlsActive && (

@@ -14,7 +14,7 @@ export function LoginScreen({ onLogin }: Props) {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        height: "100dvh",
+        height: "100vh",
         background: "linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #0a0a1a 100%)",
         padding: 24,
       }}

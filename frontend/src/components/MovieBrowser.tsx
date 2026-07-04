@@ -13,7 +13,12 @@ interface HistoryItem {
   title: string;
   url: string;
   poster: string;
-  timestamp: number;
+  started_at?: string;
+  timestamp?: number; // kept for localStorage migration
+  current_time?: number;
+  duration?: number;
+  episode_index?: number;
+  episode_text?: string;
 }
 
 interface Props {
@@ -55,28 +60,14 @@ interface PopularMovie {
   downloading: boolean;
 }
 
-const HISTORY_KEY = "streamdesk_history";
-const MAX_HISTORY = 30;
-
-function getHistory(): HistoryItem[] {
+async function fetchHistory(): Promise<HistoryItem[]> {
   try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    const r = await fetch("/api/history?limit=30");
+    if (!r.ok) return [];
+    return await r.json();
   } catch {
     return [];
   }
-}
-
-function addToHistory(movie: { title?: string; url: string; poster?: string }) {
-  const history = getHistory().filter((h) => h.url !== movie.url);
-  history.unshift({
-    title: movie.title || "",
-    url: movie.url,
-    poster: movie.poster || "",
-    timestamp: Date.now(),
-  });
-  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  return history;
 }
 
 function getWatchProgress(): Record<string, { currentTime: number; duration: number }> {
@@ -87,8 +78,9 @@ function getWatchProgress(): Record<string, { currentTime: number; duration: num
   }
 }
 
-function formatTimeAgo(ts: number): string {
-  const diff = Date.now() - ts;
+function formatTimeAgo(ts: number | string): string {
+  const time = typeof ts === "string" ? new Date(ts + (ts.endsWith("Z") ? "" : "Z")).getTime() : ts;
+  const diff = Date.now() - time;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "Just now";
   if (mins < 60) return `${mins}m ago`;
@@ -96,14 +88,14 @@ function formatTimeAgo(ts: number): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleDateString();
+  return new Date(time).toLocaleDateString();
 }
 
 export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected, user, onLogout, isAdmin, fontScale = 1, onFontScaleChange, forceInstall, onForceInstallChange }: Props) {
   const isWide = typeof window !== "undefined" && window.innerWidth > 768;
   const [movies, setMovies] = useState<Movie[]>([]);
   const [recentMovies, setRecentMovies] = useState<Movie[]>([]);
-  const [history, setHistory] = useState<HistoryItem[]>(getHistory);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -138,6 +130,23 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
       .catch(() => {});
   }, []);
 
+  // Fetch history and progress from server on mount
+  useEffect(() => {
+    fetchHistory().then(setHistory);
+    // Sync server progress into localStorage (for resume on new devices)
+    fetch("/api/history/progress")
+      .then((r) => r.ok ? r.json() : {})
+      .then((serverProgress: Record<string, { currentTime: number; duration: number }>) => {
+        if (Object.keys(serverProgress).length > 0) {
+          const local = getWatchProgress();
+          const merged = { ...serverProgress, ...local }; // local overrides server
+          localStorage.setItem("streamdesk_progress", JSON.stringify(merged));
+          setWatchProgress(merged);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Refresh watch progress when tab becomes visible or media status updates
   useEffect(() => {
     const refresh = () => setWatchProgress(getWatchProgress());
@@ -152,14 +161,10 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
         refresh();
       }
     };
-    // Listen for history update when movie starts playing
-    const onHistoryUpdate = (e: Event) => {
-      const { url, poster, title } = (e as CustomEvent).detail || {};
-      if (url) {
-        const updated = addToHistory({ url, poster, title });
-        setHistory(updated);
-        setWatchProgress(getWatchProgress());
-      }
+    // Listen for history update when movie starts playing — re-fetch from server
+    const onHistoryUpdate = () => {
+      fetchHistory().then(setHistory);
+      setWatchProgress(getWatchProgress());
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("media_status" as any, onMediaStatus);
@@ -782,22 +787,25 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                       fontSize: 8, fontWeight: 600, padding: "2px 5px",
                       borderRadius: 3, backdropFilter: "blur(4px)",
                     }}>
-                      {formatTimeAgo(item.timestamp)}
+                      {formatTimeAgo(item.started_at || item.timestamp || Date.now())}
                     </span>
                     {/* Watch progress bar */}
-                    {watchProgress[item.url] && watchProgress[item.url].duration > 0 && (
-                      <div style={{
-                        position: "absolute", bottom: 0, left: 0, right: 0, height: 3,
-                        background: "rgba(0,0,0,0.5)",
-                      }}>
+                    {(() => {
+                      const p = watchProgress[item.url] || (item.current_time && item.duration ? { currentTime: item.current_time, duration: item.duration } : null);
+                      return p && p.duration > 0 ? (
                         <div style={{
-                          width: `${Math.min(100, (watchProgress[item.url].currentTime / watchProgress[item.url].duration) * 100)}%`,
-                          height: "100%",
-                          background: "var(--accent, #e50914)",
-                          borderRadius: "0 1px 1px 0",
-                        }} />
-                      </div>
-                    )}
+                          position: "absolute", bottom: 0, left: 0, right: 0, height: 3,
+                          background: "rgba(0,0,0,0.5)",
+                        }}>
+                          <div style={{
+                            width: `${Math.min(100, (p.currentTime / p.duration) * 100)}%`,
+                            height: "100%",
+                            background: "var(--accent, #e50914)",
+                            borderRadius: "0 1px 1px 0",
+                          }} />
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                   <div style={{
                     fontSize: 11, fontWeight: 600, color: "var(--text-primary)",

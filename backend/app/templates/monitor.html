@@ -370,11 +370,7 @@
                 }, { once: true });
             }
 
-            videoPlayer.play().then(() => {
-                if (!document.fullscreenElement) {
-                    (videoPlayer.requestFullscreen || videoPlayer.webkitRequestFullscreen || function(){}).call(videoPlayer);
-                }
-            }).catch(e => {
+            videoPlayer.play().catch(e => {
                 console.error('Autoplay blocked, trying muted:', e.message);
                 // Fallback: play muted, then unmute on first user interaction
                 videoPlayer.muted = true;

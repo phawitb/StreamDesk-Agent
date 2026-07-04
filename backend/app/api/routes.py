@@ -19,6 +19,8 @@ from app.services.scraper import scrape_movies, scrape_categories, sync_all_movi
 from app.services.gemini_chat import recommend_movies
 from app.services.database import (
     upsert_movies, get_user_by_id, get_user_by_monitor_token, log_watch,
+    log_watch_enhanced, get_user_history, update_watch_progress,
+    get_user_progress, get_last_episode,
     get_app_setting, set_app_setting, get_all_watch_history,
     get_popular_movies, get_viewer_count,
     mark_downloaded, get_downloaded_urls, remove_downloaded,
@@ -282,6 +284,60 @@ async def update_settings(request: Request, body: dict):
             msg = StatusMessage(state=AgentState.IDLE, message="เปลี่ยนจอแล้ว รอคำสั่งใหม่")
             await broadcast(msg.model_dump(), user_id)
     return {"ok": True}
+
+
+# ── User Watch History ──
+
+@router.get("/api/history")
+async def get_history(request: Request, limit: int = 30):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user:
+        return []
+    return await get_user_history(user["email"], limit=limit)
+
+
+@router.post("/api/history/progress")
+async def save_progress(request: Request):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user:
+        return JSONResponse({"error": "User not found"}, status_code=404)
+    body = await request.json()
+    url = body.get("url", "")
+    ct = float(body.get("current_time", 0))
+    dur = float(body.get("duration", 0))
+    ep_index = int(body.get("episode_index", -1))
+    if url and (ct > 0 or dur > 0):
+        await update_watch_progress(user["email"], url, ct, dur, episode_index=ep_index)
+    return {"ok": True}
+
+
+@router.get("/api/history/progress")
+async def get_progress(request: Request):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user:
+        return {}
+    return await get_user_progress(user["email"])
+
+
+@router.get("/api/history/last-episode")
+async def get_last_ep(request: Request, url: str = ""):
+    user_id = _get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or not url:
+        return {"episode_index": None}
+    idx = await get_last_episode(user["email"], url)
+    return {"episode_index": idx}
 
 
 # ── App Settings (global, admin-only write) ──
@@ -698,9 +754,10 @@ async def websocket_endpoint(ws: WebSocket):
 
                     await broadcast(ChatMessage(content=f"รับคำสั่งแล้ว กำลังเปิด: {url}").model_dump(), user_id)
                     # Log watch history + auto-download check
+                    poster = msg.get("poster", "")
                     user = await get_user_by_id(user_id)
                     if user:
-                        asyncio.create_task(log_watch(user["email"], url))
+                        asyncio.create_task(log_watch_enhanced(user["email"], url, poster=poster))
                         asyncio.create_task(_check_auto_download(url))
                     resume_pos = float(msg.get("resume_position", 0))
                     task = asyncio.create_task(agent_manager.play(url, resume_position=resume_pos))
@@ -738,7 +795,17 @@ async def websocket_endpoint(ws: WebSocket):
 
             elif msg.get("type") == "select_episode":
                 index = int(msg.get("index", 0))
+                agent_manager._episode_resume_position = float(msg.get("resume_position", 0))
                 agent_manager.select_episode(index)
+                # Update history with episode info
+                ep_text = msg.get("episode_text", "")
+                if user_id:
+                    user = await get_user_by_id(user_id)
+                    if user and agent_manager._current_url:
+                        asyncio.create_task(log_watch_enhanced(
+                            user["email"], agent_manager._current_url,
+                            episode_index=index, episode_text=ep_text,
+                        ))
 
             elif msg.get("type") == "media_control":
                 action = msg.get("action", "")

@@ -12,11 +12,12 @@ interface Props {
   episodes?: EpisodeInfo[] | null;
   onSelectEpisode?: (index: number) => void;
   onSelectMovie?: (url: string, poster?: string, title?: string) => void;
+  seriesUrl?: string;
   thinkingText?: string;
   disabled?: boolean;
 }
 
-export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, onSelectEpisode, onSelectMovie, thinkingText, disabled }: Props) {
+export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, onSelectEpisode, onSelectMovie, seriesUrl, thinkingText, disabled }: Props) {
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<Movie[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -192,7 +193,7 @@ export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, 
           </div>
         ))}
         {episodes && episodes.length > 0 && onSelectEpisode && (
-          <EpisodePicker episodes={episodes} onSelect={onSelectEpisode} />
+          <EpisodePicker episodes={episodes} onSelect={onSelectEpisode} seriesUrl={seriesUrl} />
         )}
         {thinkingText && (
           <div style={{

@@ -5,9 +5,23 @@ import { usePWAInstall } from "./hooks/usePWAInstall";
 import { ChatWindow } from "./components/ChatWindow";
 import { MovieBrowser } from "./components/MovieBrowser";
 import { MediaControls } from "./components/MediaControls";
+import { saveLastEpisode } from "./components/EpisodePicker";
 import { LoginScreen } from "./components/LoginScreen";
 import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage } from "./types/messages";
 import "./App.css";
+
+/** Progress key: "url" for movies, "url::ep0" for series episodes */
+function progressKey(url: string, epIndex: number): string {
+  return epIndex >= 0 ? `${url}::ep${epIndex}` : url;
+}
+
+function getResumePos(url: string, epIndex: number): number {
+  try {
+    const progress = JSON.parse(localStorage.getItem("streamdesk_progress") || "{}");
+    const saved = progress[progressKey(url, epIndex)];
+    return saved?.currentTime && saved?.duration && saved.currentTime < saved.duration - 10 ? saved.currentTime : 0;
+  } catch { return 0; }
+}
 
 function App() {
   const { user, loading: authLoading, login, logout } = useAuth();
@@ -18,8 +32,8 @@ function App() {
     return (s === "browse" || s === "chat" || s === "monitor") ? s : "browse";
   });
   const [forceInstall, setForceInstall] = useState(true);
-  const [currentPoster, setCurrentPoster] = useState(() => sessionStorage.getItem("currentPoster") || "");
-  const [playingUrl, setPlayingUrl] = useState(() => sessionStorage.getItem("playingUrl") || "");
+  const [currentPoster, setCurrentPoster] = useState(() => localStorage.getItem("streamdesk_poster") || "");
+  const [playingUrl, setPlayingUrl] = useState(() => localStorage.getItem("streamdesk_playingUrl") || "");
   const [monitorMode, setMonitorMode] = useState<"inapp" | "device" | "url">(() => {
     const stored = localStorage.getItem("monitorMode");
     if (stored === "inapp" || stored === "device" || stored === "url") return stored;
@@ -28,8 +42,12 @@ function App() {
   const [monitorFullscreen, setMonitorFullscreen] = useState(false);
   const [orientationLock, setOrientationLock] = useState<"auto" | "landscape" | "portrait">("auto");
   const [desktopMonitorExpanded, setDesktopMonitorExpanded] = useState(false);
+  const [autoSelectEpisode, setAutoSelectEpisode] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [monitorToken, setMonitorToken] = useState<string | null>(null);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const playingEpisodeRef = useRef(-1); // -1 = no episode (movie), 0+ = episode index
 
   // Persist monitor mode and sync to backend
   useEffect(() => {
@@ -93,7 +111,10 @@ function App() {
   }, [setPairedDevice]);
 
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(window.innerWidth > 768);
+  const [isDesktop, setIsDesktop] = useState(() => {
+    // iPad portrait = mobile, iPad landscape = desktop
+    return window.innerWidth > 768 && window.innerWidth > window.innerHeight;
+  });
   const [rightWidth, setRightWidth] = useState(() => {
     const stored = localStorage.getItem("desktopRightWidth");
     return stored ? parseInt(stored) : Math.round(window.innerWidth / 3);
@@ -110,21 +131,23 @@ function App() {
     localStorage.setItem("fontScale", String(scale));
   }, []);
 
-  // Persist UI state to sessionStorage (survives back-gesture app restart)
+  // Persist UI state
   useEffect(() => { sessionStorage.setItem("activeTab", activeTab); }, [activeTab]);
-  useEffect(() => { sessionStorage.setItem("playingUrl", playingUrl); }, [playingUrl]);
-  useEffect(() => { sessionStorage.setItem("currentPoster", currentPoster); }, [currentPoster]);
+  useEffect(() => { localStorage.setItem("streamdesk_playingUrl", playingUrl); }, [playingUrl]);
+  useEffect(() => { localStorage.setItem("streamdesk_poster", currentPoster); }, [currentPoster]);
 
-  // Trap back button / edge swipe — push history so popstate never exits app
+
+
+  // Trap back button / edge swipe — fake-click current tab so app never exits
   useEffect(() => {
     history.replaceState({ guard: true }, "");
-    for (let i = 0; i < 50; i++) history.pushState({ guard: true }, "");
+    for (let i = 0; i < 3; i++) history.pushState({ guard: true }, "");
     const onPopState = () => {
       const tab = activeTabRef.current;
       setActiveTab(tab === "browse" ? "chat" : "browse");
       requestAnimationFrame(() => {
         setActiveTab(tab);
-        for (let i = 0; i < 10; i++) history.pushState({ guard: true }, "");
+        history.pushState({ guard: true }, "");
       });
     };
     window.addEventListener("popstate", onPopState);
@@ -133,7 +156,7 @@ function App() {
 
   // Detect desktop vs mobile
   useEffect(() => {
-    const check = () => setIsDesktop(window.innerWidth > 768);
+    const check = () => setIsDesktop(window.innerWidth > 768 && window.innerWidth > window.innerHeight);
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   }, []);
@@ -200,6 +223,7 @@ function App() {
   playingUrlRef.current = playingUrl;
   useEffect(() => {
     let lastSave = 0;
+    let lastServerSave = 0;
     const handler = (e: CustomEvent) => {
       const data = e.detail;
       if (data.type === "media_status" && playingUrlRef.current) {
@@ -208,10 +232,20 @@ function App() {
         if (dur > 0 && ct > 5 && Date.now() - lastSave > 3000) {
           lastSave = Date.now();
           try {
+            const key = progressKey(playingUrlRef.current, playingEpisodeRef.current);
             const progress = JSON.parse(localStorage.getItem("streamdesk_progress") || "{}");
-            progress[playingUrlRef.current] = { currentTime: ct, duration: dur };
+            progress[key] = { currentTime: ct, duration: dur };
             localStorage.setItem("streamdesk_progress", JSON.stringify(progress));
           } catch {}
+          // Also save to server (throttled: every 30s)
+          if (Date.now() - lastServerSave > 30000) {
+            lastServerSave = Date.now();
+            fetch("/api/history/progress", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: playingUrlRef.current, current_time: ct, duration: dur, episode_index: playingEpisodeRef.current }),
+            }).catch(() => {});
+          }
         }
       }
     };
@@ -292,8 +326,14 @@ function App() {
         }
       }
     }
-    return "";
+    // Fallback: restore from sessionStorage (app restart)
+    return localStorage.getItem("streamdesk_title") || "";
   }, [messages]);
+
+  // Persist title to sessionStorage
+  useEffect(() => {
+    if (currentTitle) localStorage.setItem("streamdesk_title", currentTitle);
+  }, [currentTitle]);
 
   const episodes = useMemo<EpisodeInfo[] | null>(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -311,13 +351,17 @@ function App() {
 
   const handleSelectEpisode = useCallback(
     (index: number) => {
-      send({ type: "select_episode", index });
       const ep = episodes?.find((e) => e.index === index);
-      addMessage({ type: "chat", role: "user", content: `เลือก ${ep?.text || `ตอนที่ ${index + 1}`}` });
-      // Add loading status to clear episode picker immediately
+      const epText = ep?.text || `ตอนที่ ${index + 1}`;
+      playingEpisodeRef.current = index;
+      const resumePos = playingUrl ? getResumePos(playingUrl, index) : 0;
+      send({ type: "select_episode", index, episode_text: epText, resume_position: resumePos } as any);
+      addMessage({ type: "chat", role: "user", content: `เลือก ${epText}` });
       addMessage({ type: "status", state: "loading_player", message: "กำลังโหลด...", timestamp: new Date().toISOString() } as any);
+      // Save last episode for this series
+      if (playingUrl) saveLastEpisode(playingUrl, index);
     },
-    [send, addMessage, episodes]
+    [send, addMessage, episodes, playingUrl]
   );
 
   const handleMediaControl = useCallback(
@@ -341,10 +385,9 @@ function App() {
         return;
       }
       if (isUrl) {
-        const progress = JSON.parse(localStorage.getItem("streamdesk_progress") || "{}");
-        const saved = progress[text];
-        const resumePos = saved?.currentTime && saved?.duration && saved.currentTime < saved.duration - 10 ? saved.currentTime : 0;
-        send({ type: "play_request", url: text, resume_position: resumePos });
+        playingEpisodeRef.current = -1; // reset episode on new URL
+        const resumePos = getResumePos(text, -1);
+        send({ type: "play_request", url: text, resume_position: resumePos, poster: currentPoster } as any);
         setPlayingUrl(text);
       } else {
         send({ type: "play_request", query: text });
@@ -372,16 +415,15 @@ function App() {
         setActiveTab("chat");
         return;
       }
-      const progress = JSON.parse(localStorage.getItem("streamdesk_progress") || "{}");
-      const saved = progress[url];
-      const resumePos = saved?.currentTime && saved?.duration && saved.currentTime < saved.duration - 10 ? saved.currentTime : 0;
-      send({ type: "play_request", url, resume_position: resumePos });
+      playingEpisodeRef.current = -1; // reset episode on new URL
+      const resumePos = getResumePos(url, -1);
+      send({ type: "play_request", url, resume_position: resumePos, poster: poster || currentPoster } as any);
       setPlayingUrl(url);
       addMessage({ type: "chat", role: "user", content: url });
       if (poster) setCurrentPoster(poster);
       setActiveTab("chat");
     },
-    [send, addMessage, isExternalDisconnected]
+    [send, addMessage, isExternalDisconnected, currentPoster]
   );
 
   const isPlaying = currentState === "playing";
@@ -390,29 +432,48 @@ function App() {
 
   const handleReplay = useCallback(() => {
     if (playingUrl) {
-      handleSelectMovie(playingUrl, currentPoster || undefined);
+      setAutoSelectEpisode(true);
+      const resumePos = getResumePos(playingUrl, playingEpisodeRef.current);
+      send({ type: "play_request", url: playingUrl, resume_position: resumePos, poster: currentPoster } as any);
+      // Stay on current tab — don't switch to chat
     }
-  }, [playingUrl, currentPoster, handleSelectMovie]);
+  }, [playingUrl, send, currentPoster]);
 
-  // Reset poster and orientation lock when state goes idle
+  // Reset poster and orientation lock when state goes idle (keep if playingUrl still set)
   useEffect(() => {
-    if (currentState === "idle") {
+    if (currentState === "idle" && !playingUrl) {
       setCurrentPoster("");
       setOrientationLock("auto");
+      localStorage.removeItem("streamdesk_title");
     }
-  }, [currentState]);
+  }, [currentState, playingUrl]);
 
-  // Auto-switch to chat when episodes appear
+  // Auto-switch to chat when episodes appear, auto-select if replay/stuck
   useEffect(() => {
     if (episodes && episodes.length > 0) {
+      if (autoSelectEpisode && playingUrl) {
+        // Auto-select last watched episode
+        try {
+          const data = JSON.parse(localStorage.getItem("streamdesk_last_episode") || "{}");
+          const lastIndex = data[playingUrl];
+          if (lastIndex !== undefined) {
+            const idx = Math.min(lastIndex, episodes.length - 1);
+            setTimeout(() => handleSelectEpisode(idx), 300);
+            setAutoSelectEpisode(false);
+            return;
+          }
+        } catch {}
+        setAutoSelectEpisode(false);
+        return; // Don't switch tab during auto-replay
+      }
       setActiveTab("chat");
     }
-  }, [episodes]);
+  }, [episodes, autoSelectEpisode, playingUrl, handleSelectEpisode]);
 
-  // Auto-switch tabs based on state
+  // Auto-switch tabs based on state (skip during auto-replay)
   useEffect(() => {
     if (currentState === "launching" || currentState === "navigating" || currentState === "loading_player") {
-      setActiveTab("chat");
+      if (!autoSelectEpisode) setActiveTab("chat");
     } else if (currentState === "playing") {
       // Ready — add to history + switch to monitor
       if (playingUrl) {
@@ -429,7 +490,7 @@ function App() {
   // Auth loading
   if (authLoading) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "var(--bg-base)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--bg-base)" }}>
         <div style={{ color: "var(--text-muted)", fontSize: 14 }}>Loading...</div>
       </div>
     );
@@ -450,7 +511,7 @@ function App() {
     return (
       <div style={{
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100dvh", background: "var(--bg-base)", padding: 32, textAlign: "center",
+        height: "100vh", background: "var(--bg-base)", padding: 32, textAlign: "center",
       }}>
         <img src="/icon-192.png" alt="StreamDesk" style={{ width: 96, height: 96, borderRadius: 20, marginBottom: 24 }} />
         <h2 style={{ color: "var(--text-primary)", fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
@@ -521,6 +582,7 @@ function App() {
       episodes={episodes}
       onSelectEpisode={handleSelectEpisode}
       onSelectMovie={handleSelectMovie}
+      seriesUrl={playingUrl}
       thinkingText={thinkingText}
       disabled={isExternalDisconnected}
     />
@@ -613,7 +675,7 @@ function App() {
   ) : null;
 
   return (
-    <div className={`app ${monitorIsFullscreen ? "monitor-fullscreen" : ""}`} style={fontScale !== 1 ? { zoom: fontScale, height: `calc(100dvh / ${fontScale})` } : undefined}>
+    <div className={`app ${monitorIsFullscreen ? "monitor-fullscreen" : ""}`} style={fontScale !== 1 ? { zoom: fontScale, height: `calc(100vh / ${fontScale})` } : undefined}>
       <div className="app-body">
         <div className="main-content">
           {isDesktop ? (
@@ -651,7 +713,7 @@ function App() {
 
       {!keyboardVisible && (
         <div className="now-playing-bar">
-          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} statusText={thinkingText} onReplay={playingUrl ? handleReplay : undefined} />
+          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} statusText={thinkingText} onReplay={playingUrl ? handleReplay : undefined} onReload={playingUrl ? handleReplay : undefined} />
         </div>
       )}
 
