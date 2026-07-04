@@ -203,7 +203,11 @@ class AgentManager:
             await self._monitor.pause()
 
         try:
-            if YOUTUBE_RE.search(url):
+            if url.startswith("youtube:"):
+                # Replay from history — re-search YouTube
+                search_query = url[len("youtube:"):]
+                await self.play_youtube_search(search_query)
+            elif YOUTUBE_RE.search(url):
                 await self._play_youtube(url, resume_position)
             else:
                 await self._play_site(url, resume_position)
