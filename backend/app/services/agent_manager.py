@@ -12,7 +12,6 @@ from app.agents.registry import get_agent_for_url
 from app.services.monitor import monitor_manager, MonitorController
 
 YOUTUBE_RE = re.compile(r'(youtube\.com|youtu\.be)')
-BILIBILI_RE = re.compile(r'(bilibili\.com|bilibili\.tv|b23\.tv|bili\.im)')
 
 # Import site agents to trigger registration
 import app.agents.sites.hd24  # noqa: F401
@@ -218,8 +217,6 @@ class AgentManager:
         try:
             if YOUTUBE_RE.search(url):
                 await self._play_youtube(url, resume_position)
-            elif BILIBILI_RE.search(url):
-                await self._play_with_ytdlp(url, "Bilibili", resume_position)
             else:
                 await self._play_site(url, resume_position)
         except asyncio.CancelledError:
@@ -230,25 +227,6 @@ class AgentManager:
     async def _play_youtube(self, url: str, resume_position: float = 0):
         """YouTube: extract stream URL with yt-dlp and play directly."""
         await self._report("launching", "กำลังเปิด YouTube...")
-
-        if not self._monitor.connected:
-            await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
-            return
-
-        title = await self._get_title_ytdlp(url)
-        await self._report("loading_player", f"กำลังโหลด: {title}...")
-
-        stream_url = await self._extract_stream_ytdlp(url)
-        if not stream_url:
-            await self._report("error", "ไม่สามารถดึง stream URL ได้")
-            return
-
-        await self._monitor.open_url(stream_url, title, start_time=resume_position)
-        await self._report("playing", f"กำลังเล่น: {title}")
-
-    async def _play_with_ytdlp(self, url: str, platform_name: str = "Video", resume_position: float = 0):
-        """Extract stream URL with yt-dlp and play directly."""
-        await self._report("launching", f"กำลังเปิด {platform_name}...")
 
         if not self._monitor.connected:
             await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
