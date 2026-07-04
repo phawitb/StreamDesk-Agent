@@ -40,14 +40,14 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
   const [displayTime, setDisplayTime] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [dragTime, setDragTime] = useState(0);
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
-  const tickRef = useRef<ReturnType<typeof setInterval>>();
+  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const tickRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const titleRef = useRef<HTMLDivElement>(null);
   const [needsMarquee, setNeedsMarquee] = useState(false);
 
   const isWaiting = WAITING_STATES.has(currentState);
   const active = !!isPlaying;
-  const stuckCheckRef = useRef<ReturnType<typeof setTimeout>>();
+  const stuckCheckRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const resumeTimeRef = useRef(0);
   const latestTimeRef = useRef(0);
   const onReplayRef = useRef(onReplay);

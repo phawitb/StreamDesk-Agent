@@ -26,7 +26,7 @@ function getResumePos(url: string, epIndex: number): number {
 
 function App() {
   const { user, loading: authLoading, login, logout } = useAuth();
-  const { connected, monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, addMessage, send } = useWebSocket();
+  const { monitorInConnected, monitorOutConnected, pairedDevice, setPairedDevice, messages, addMessage, send } = useWebSocket();
   const { canInstall, install } = usePWAInstall();
   const [activeTab, setActiveTab] = useState<"browse" | "chat" | "monitor">(() => {
     const s = sessionStorage.getItem("activeTab");
@@ -299,7 +299,7 @@ function App() {
           const rec = m as MovieRecommendationMessage;
           return { id: `rec-${i}`, role: "assistant" as const, content: rec.message, timestamp: new Date(), recommendations: rec.movies };
         }
-        return { id: `err-${i}`, role: "system" as const, content: `Error: ${m.message}`, timestamp: new Date() };
+        return { id: `err-${i}`, role: "system" as const, content: `Error: ${(m as { message: string }).message}`, timestamp: new Date() };
       });
   }, [messages]);
 
@@ -412,7 +412,7 @@ function App() {
   );
 
   const handleSelectMovie = useCallback(
-    (url: string, poster?: string, title?: string) => {
+    (url: string, poster?: string, _title?: string) => {
       if (isExternalDisconnected) {
         addMessage({
           type: "chat",
@@ -600,8 +600,6 @@ function App() {
     <ChatWindow
       messages={displayMessages}
       onSend={handleSend}
-      isPlaying={isPlaying}
-      onDownload={isAdmin ? () => send({ type: "command", action: "download" }) : undefined}
       episodes={episodes}
       onSelectEpisode={handleSelectEpisode}
       onSelectMovie={handleSelectMovie}
@@ -749,7 +747,7 @@ function App() {
             ) : (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
             )}
-            {contentMode === "music" ? "Music" : "Browse"}
+            {contentMode === "music" ? "Music" : "Movie"}
           </button>
           {showMonitorTab && (
             <button className={`bottom-nav-item ${activeTab === "monitor" ? "active" : ""}`} onClick={() => setActiveTab("monitor")}>

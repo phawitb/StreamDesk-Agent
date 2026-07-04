@@ -9,11 +9,11 @@ interface Props {
   onPrevTrack?: () => void;
 }
 
-export function InAppPlayer({ style, contentMode = "movie", onNextTrack, onPrevTrack }: Props) {
+export function InAppPlayer({ style, onNextTrack, onPrevTrack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
-  const statusIntervalRef = useRef<ReturnType<typeof setInterval>>();
+  const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const statusIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const volumeRef = useRef(50);
   const mutedRef = useRef(false);
   const titleRef = useRef("");

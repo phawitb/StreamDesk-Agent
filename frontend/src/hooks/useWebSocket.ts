@@ -16,7 +16,7 @@ export function useWebSocket() {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
