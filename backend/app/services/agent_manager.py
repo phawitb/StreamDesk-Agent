@@ -65,6 +65,8 @@ class AgentManager:
         self._cached_stream_url: Optional[str] = None
         self._preselected_episode: Optional[int] = None  # Skip episode picker if set
         self._episode_resume_position: float = 0  # Resume position from episode selection
+        self._music_history: list[str] = []  # played search queries
+        self._music_index: int = -1  # current position in music history
 
     def set_user(self, user_id: int):
         self._user_id = user_id
@@ -243,7 +245,7 @@ class AgentManager:
         await self._monitor.open_url(stream_url, title, start_time=resume_position)
         await self._report("playing", f"กำลังเล่น: {title}")
 
-    async def play_youtube_search(self, search_query: str):
+    async def play_youtube_search(self, search_query: str, add_to_history: bool = True):
         """Search YouTube and play the top result."""
         await self._report("launching", f"กำลังค้นหา YouTube: {search_query}...")
 
@@ -274,6 +276,13 @@ class AgentManager:
                 await self._report("error", "ไม่สามารถดึง stream URL ได้")
                 return
 
+            # Track music history
+            if add_to_history:
+                # Trim forward history if navigating back then playing new
+                self._music_history = self._music_history[:self._music_index + 1]
+                self._music_history.append(search_query)
+                self._music_index = len(self._music_history) - 1
+
             await self._report("loading_player", f"กำลังเปิด: {title}...")
             await self._monitor.open_url(stream_url, title)
             await self._report("playing", f"กำลังเล่น: {title}")
@@ -283,6 +292,26 @@ class AgentManager:
         except Exception as e:
             logger.error("YouTube search failed: %s", e)
             await self._report("error", f"ค้นหาไม่สำเร็จ: {e}")
+
+    async def play_next_music(self):
+        """Play next track in music history (replay current if at end)."""
+        if not self._music_history:
+            await self._report("error", "ไม่มีเพลงในคิว")
+            return
+        if self._music_index < len(self._music_history) - 1:
+            self._music_index += 1
+        query = self._music_history[self._music_index]
+        await self.play_youtube_search(query, add_to_history=False)
+
+    async def play_prev_music(self):
+        """Play previous track in music history."""
+        if not self._music_history:
+            await self._report("error", "ไม่มีเพลงในคิว")
+            return
+        if self._music_index > 0:
+            self._music_index -= 1
+        query = self._music_history[self._music_index]
+        await self.play_youtube_search(query, add_to_history=False)
 
     async def _get_title_ytdlp(self, url: str) -> str:
         """Get video title using yt-dlp."""

@@ -4,9 +4,12 @@ const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
 
 interface Props {
   style?: React.CSSProperties;
+  contentMode?: "movie" | "music";
+  onNextTrack?: () => void;
+  onPrevTrack?: () => void;
 }
 
-export function InAppPlayer({ style }: Props) {
+export function InAppPlayer({ style, contentMode = "movie", onNextTrack, onPrevTrack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
@@ -15,6 +18,10 @@ export function InAppPlayer({ style }: Props) {
   const mutedRef = useRef(false);
   const titleRef = useRef("");
   const urlRef = useRef("");
+  const onNextRef = useRef(onNextTrack);
+  const onPrevRef = useRef(onPrevTrack);
+  onNextRef.current = onNextTrack;
+  onPrevRef.current = onPrevTrack;
 
   const reportStatus = useCallback(() => {
     const ws = wsRef.current;
@@ -75,6 +82,8 @@ export function InAppPlayer({ style }: Props) {
     navigator.mediaSession.setActionHandler("seekto", (details) => {
       if (video && details.seekTime != null) video.currentTime = details.seekTime;
     });
+    navigator.mediaSession.setActionHandler("nexttrack", onNextRef.current || null);
+    navigator.mediaSession.setActionHandler("previoustrack", onPrevRef.current || null);
   }, []);
 
   const doPlay = useCallback(() => {

@@ -454,9 +454,16 @@ async def sync_movies():
 
 # ── Chat / Recommendation ──
 
-async def _handle_recommendation(query: str, user_id: int | None = None):
+async def _handle_recommendation(query: str, user_id: int | None = None, content_mode: str = "movie"):
     try:
-        # Detect intent: music or movie
+        if content_mode == "music":
+            # Music mode: always search YouTube
+            await broadcast(ChatMessage(content=f"กำลังค้นหาเพลง: {query}...").model_dump(), user_id)
+            task = asyncio.create_task(agent_manager.play_youtube_search(query))
+            _play_tasks[user_id] = task
+            return
+
+        # Movie mode: detect intent first (music request in movie mode → still play music)
         intent_result = await detect_intent(query)
         intent = intent_result.get("intent", "movie")
         message = intent_result.get("message", "")
@@ -581,7 +588,8 @@ async def websocket_endpoint(ws: WebSocket):
                     task = asyncio.create_task(agent_manager.play(url, resume_position=resume_pos))
                     _play_tasks[user_id] = task
                 elif query:
-                    asyncio.create_task(_handle_recommendation(query, user_id))
+                    content_mode = msg.get("content_mode", "movie")
+                    asyncio.create_task(_handle_recommendation(query, user_id, content_mode))
                 else:
                     await ws.send_text(json.dumps(
                         ErrorMessage(message="กรุณาระบุ URL หรือชื่อหนัง").model_dump(),
@@ -595,6 +603,12 @@ async def websocket_endpoint(ws: WebSocket):
                 elif action == "stop":
                     await agent_manager.stop_playback()
                     await ctrl.stop()
+                elif action == "next_track":
+                    task = asyncio.create_task(agent_manager.play_next_music())
+                    _play_tasks[user_id] = task
+                elif action == "prev_track":
+                    task = asyncio.create_task(agent_manager.play_prev_music())
+                    _play_tasks[user_id] = task
                 elif action in ("pause", "resume", "seek_forward", "seek_backward", "seek_to"):
                     value = float(msg.get("value", 0))
                     if action == "pause":
