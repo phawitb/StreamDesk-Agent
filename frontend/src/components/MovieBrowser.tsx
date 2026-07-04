@@ -1208,6 +1208,7 @@ function NavBtn({ disabled, onClick, dir }: { disabled: boolean; onClick: () => 
 
 interface MusicHistoryItem {
   query: string;
+  title?: string;
   timestamp: number;
 }
 
@@ -1219,10 +1220,19 @@ function getMusicHistory(): MusicHistoryItem[] {
   }
 }
 
-function addMusicHistory(query: string) {
+function addMusicHistory(query: string, title?: string) {
   const history = getMusicHistory().filter((h) => h.query !== query);
-  history.unshift({ query, timestamp: Date.now() });
+  history.unshift({ query, title, timestamp: Date.now() });
   localStorage.setItem("streamdesk_music_history", JSON.stringify(history.slice(0, 50)));
+}
+
+function updateMusicHistoryTitle(title: string) {
+  const history = getMusicHistory();
+  if (history.length > 0 && !history[0].title) {
+    history[0].title = title;
+    localStorage.setItem("streamdesk_music_history", JSON.stringify(history));
+  }
+  return history;
 }
 
 function removeMusicHistory(query: string) {
@@ -1234,6 +1244,18 @@ function MusicBrowse({ onPlayMusic }: { onPlayMusic?: (query: string) => void })
   const [history, setHistory] = useState<MusicHistoryItem[]>(getMusicHistory);
   const [searchText, setSearchText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Listen for streamdesk_history to update the title of the most recent music entry
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      const title = e.detail?.title;
+      if (title) {
+        setHistory(updateMusicHistoryTitle(title));
+      }
+    };
+    window.addEventListener("streamdesk_history" as any, handler as any);
+    return () => window.removeEventListener("streamdesk_history" as any, handler as any);
+  }, []);
 
   const handlePlay = useCallback((query: string) => {
     addMusicHistory(query);
@@ -1330,10 +1352,10 @@ function MusicBrowse({ onPlayMusic }: { onPlayMusic?: (query: string) => void })
             {/* Title + time */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {item.query}
+                {item.title || item.query}
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                {formatTimeAgo(item.timestamp)}
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {item.title ? item.query + " · " : ""}{formatTimeAgo(item.timestamp)}
               </div>
             </div>
 
