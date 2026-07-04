@@ -39,8 +39,6 @@ interface Props {
   onFontScaleChange?: (scale: number) => void;
   forceInstall?: boolean;
   onForceInstallChange?: (enabled: boolean) => void;
-  contentMode?: "movie" | "music";
-  onPlayMusic?: (query: string) => void;
 }
 
 interface WatchHistoryEntry {
@@ -58,6 +56,8 @@ interface PopularMovie {
   viewer_count: number;
   play_count: number;
   last_watched: string;
+  downloaded: boolean;
+  downloading: boolean;
 }
 
 async function fetchHistory(): Promise<HistoryItem[]> {
@@ -91,7 +91,7 @@ function formatTimeAgo(ts: number | string): string {
   return new Date(time).toLocaleDateString();
 }
 
-export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected, user, onLogout, isAdmin, fontScale = 1, onFontScaleChange, forceInstall, onForceInstallChange, contentMode = "movie", onPlayMusic }: Props) {
+export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected, user, onLogout, isAdmin, fontScale = 1, onFontScaleChange, forceInstall, onForceInstallChange }: Props) {
   const [isWide, setIsWide] = useState(() => typeof window !== "undefined" && window.innerWidth > 768 && window.innerWidth > window.innerHeight);
   useEffect(() => {
     const check = () => setIsWide(window.innerWidth > 768 && window.innerWidth > window.innerHeight);
@@ -118,6 +118,13 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
   const [watchHistoryLoading, setWatchHistoryLoading] = useState(false);
   const [popularMovies, setPopularMovies] = useState<PopularMovie[]>([]);
   const [popularMoviesLoading, setPopularMoviesLoading] = useState(false);
+  const [autoDownloadThreshold, setAutoDownloadThreshold] = useState(0);
+  const [downloadingUrls, setDownloadingUrls] = useState<Set<string>>(new Set());
+  const [showVideoStorage, setShowVideoStorage] = useState(false);
+  const [videoList, setVideoList] = useState<{ filename: string; size: number; modified: number }[]>([]);
+  const [videoTotalSize, setVideoTotalSize] = useState(0);
+  const [videoMaxBytes, setVideoMaxBytes] = useState(10 * 1024 * 1024 * 1024);
+  const [videoLoading, setVideoLoading] = useState(false);
   const [watchProgress, setWatchProgress] = useState<Record<string, { currentTime: number; duration: number }>>(getWatchProgress);
   const recentRef = useRef<HTMLDivElement>(null);
 
@@ -264,6 +271,7 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
       if (resp.ok) {
         const data = await resp.json();
         setPopularMovies(data.movies);
+        setAutoDownloadThreshold(data.auto_download_threshold);
       }
     } catch (e) {
       console.error("Failed to load popular movies:", e);
@@ -272,23 +280,89 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
     }
   };
 
+  const handleDownloadMovie = async (url: string) => {
+    setDownloadingUrls((prev) => new Set(prev).add(url));
+    try {
+      await fetch("/api/admin/download-movie", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+    } catch (e) {
+      console.error("Download failed:", e);
+    }
+  };
+
+  const handleSaveAutoDownload = async (value: number) => {
+    setAutoDownloadThreshold(value);
+    try {
+      await fetch("/api/app-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auto_download_threshold: value }),
+      });
+      // Refresh after a short delay to show new download statuses
+      setTimeout(fetchPopularMovies, 1500);
+    } catch (e) {
+      console.error("Failed to save auto-download threshold:", e);
+    }
+  };
+
+  const fetchVideos = async () => {
+    setVideoLoading(true);
+    try {
+      const resp = await fetch("/api/admin/videos");
+      if (resp.ok) {
+        const data = await resp.json();
+        setVideoList(data.videos);
+        setVideoTotalSize(data.total_size);
+        setVideoMaxBytes(data.max_storage_bytes);
+      }
+    } catch (e) {
+      console.error("Failed to load videos:", e);
+    } finally {
+      setVideoLoading(false);
+    }
+  };
+
+  const handleOpenVideoStorage = () => {
+    setShowVideoStorage(true);
+    setShowSettings(false);
+    fetchVideos();
+  };
+
+  const handleDeleteVideo = async (filename: string) => {
+    await fetch(`/api/admin/videos/${encodeURIComponent(filename)}`, { method: "DELETE" });
+    fetchVideos();
+  };
+
+  const handleDeleteAllVideos = async () => {
+    await fetch("/api/admin/videos", { method: "DELETE" });
+    fetchVideos();
+  };
+
+  const handleMaxStorageChange = async (gb: number) => {
+    const clamped = Math.max(1, Math.min(100, gb));
+    setVideoMaxBytes(clamped * 1024 * 1024 * 1024);
+    await fetch("/api/app-settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_storage_gb: clamped }),
+    }).catch(() => {});
+  };
+
   // Connection status helpers
   const isConnected = !!connected;
   const statusColor = isConnected ? "#46D369" : "#E50914";
   const modeLabels = { inapp: "In-App", device: "λ-Device", url: "URL" };
   const statusLabel = modeLabels[monitorMode] || "Monitor";
 
-  // ── Music Mode Browse ──
-  if (contentMode === "music") {
-    return <MusicBrowse onPlayMusic={onPlayMusic} />;
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Header */}
       <div style={{ padding: "20px 24px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.3, color: "var(--text-primary)" }}>
-          Movie
+          Browse
         </h1>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -617,6 +691,17 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                               <circle cx="12" cy="12" r="10" /><polyline points="12,6 12,12 16,14" />
                             </svg>
                             Watch History
+                          </button>
+                          <button
+                            onClick={handleOpenVideoStorage}
+                            style={menuItemStyle(false, isWide)}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-highlight)")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: isWide ? 20 : 16, height: isWide ? 20 : 16, flexShrink: 0 }}>
+                              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                            </svg>
+                            Video Storage
                           </button>
                           <div
                             onClick={() => onForceInstallChange?.(!forceInstall)}
@@ -1094,6 +1179,37 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                   <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>No movies</div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {/* Auto-download setting */}
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: isWide ? "10px 8px" : "8px 4px",
+                      borderBottom: "1px solid var(--border)",
+                      background: "rgba(255,255,255,0.03)", borderRadius: 6,
+                      marginBottom: 4,
+                    }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16, flexShrink: 0, color: "var(--text-muted)" }}>
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7,10 12,15 17,10" /><line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                      <span style={{ fontSize: isWide ? 12 : 11, color: "var(--text-secondary)", flex: 1 }}>
+                        Auto download when viewers &ge;
+                      </span>
+                      <select
+                        value={autoDownloadThreshold}
+                        onChange={(e) => handleSaveAutoDownload(parseInt(e.target.value))}
+                        style={{
+                          background: "var(--bg-base)", color: "var(--text-primary)", border: "1px solid var(--border)",
+                          borderRadius: 4, padding: "4px 8px", fontSize: isWide ? 12 : 11, cursor: "pointer",
+                        }}
+                      >
+                        <option value={0}>Off</option>
+                        <option value={2}>2</option>
+                        <option value={3}>3</option>
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                      </select>
+                    </div>
+
+                    {/* Movie list */}
                     {popularMovies.map((movie) => (
                       <div key={movie.url} style={{
                         display: "flex", alignItems: "center", gap: isWide ? 12 : 8,
@@ -1129,6 +1245,27 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
                           </div>
                         </div>
 
+                        {/* Download button */}
+                        {(() => {
+                          const isDownloading = movie.downloading || downloadingUrls.has(movie.url);
+                          return (
+                            <button
+                              onClick={() => !movie.downloaded && !isDownloading && handleDownloadMovie(movie.url)}
+                              disabled={movie.downloaded || isDownloading}
+                              style={{
+                                padding: isWide ? "6px 12px" : "4px 10px", borderRadius: 6,
+                                border: "1px solid var(--border)",
+                                background: movie.downloaded ? "rgba(34,197,94,0.15)" : isDownloading ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.08)",
+                                color: movie.downloaded ? "#22c55e" : isDownloading ? "#3b82f6" : "var(--text-secondary)",
+                                fontSize: isWide ? 11 : 10, fontWeight: 600,
+                                cursor: movie.downloaded || isDownloading ? "default" : "pointer",
+                                whiteSpace: "nowrap", flexShrink: 0,
+                              }}
+                            >
+                              {movie.downloaded ? "Downloaded" : isDownloading ? "Downloading..." : "Download"}
+                            </button>
+                          );
+                        })()}
                       </div>
                     ))}
                   </div>
@@ -1139,6 +1276,144 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
         </div>
       )}
 
+      {/* Video Storage modal (admin) */}
+      {showVideoStorage && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 99, zoom: fontScale !== 1 ? 1 / fontScale : undefined }}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)" }} onClick={() => setShowVideoStorage(false)} />
+          <div style={{
+            position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+            zIndex: 100, background: "var(--bg-elevated)", border: "1px solid var(--border)",
+            borderRadius: 12, padding: isWide ? 24 : 16,
+            width: isWide ? "min(700px, 70vw)" : "calc(100vw - 24px)",
+            maxHeight: "85vh", display: "flex", flexDirection: "column",
+            boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
+          }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isWide ? 16 : 12, flexShrink: 0 }}>
+              <h3 style={{ fontSize: isWide ? 20 : 17, fontWeight: 700, color: "var(--text-primary)" }}>Video Storage</h3>
+              <button
+                onClick={() => setShowVideoStorage(false)}
+                style={{
+                  width: 32, height: 32, borderRadius: "50%", border: "none",
+                  background: "rgba(255,255,255,0.08)", color: "var(--text-secondary)",
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Storage bar + max setting */}
+            <div style={{ flexShrink: 0, marginBottom: isWide ? 16 : 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div style={{ fontSize: isWide ? 13 : 12, color: "var(--text-secondary)" }}>
+                  {(videoTotalSize / 1024 / 1024 / 1024).toFixed(2)} GB / {(videoMaxBytes / 1024 / 1024 / 1024).toFixed(0)} GB
+                  <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>({videoList.length} files)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: isWide ? 12 : 11, color: "var(--text-muted)" }}>Max:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={Math.round(videoMaxBytes / 1024 / 1024 / 1024)}
+                    onChange={(e) => handleMaxStorageChange(Number(e.target.value))}
+                    style={{
+                      width: 52, padding: "4px 6px", borderRadius: 4,
+                      border: "1px solid var(--border)", background: "var(--bg-base)",
+                      color: "var(--text-primary)", fontSize: isWide ? 13 : 12, textAlign: "center",
+                      outline: "none",
+                    }}
+                  />
+                  <span style={{ fontSize: isWide ? 12 : 11, color: "var(--text-muted)" }}>GB</span>
+                </div>
+              </div>
+              {/* Progress bar */}
+              <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", borderRadius: 3, transition: "width 0.3s",
+                  width: `${Math.min(100, (videoTotalSize / videoMaxBytes) * 100)}%`,
+                  background: videoTotalSize / videoMaxBytes > 0.9 ? "var(--accent)" : "var(--success)",
+                }} />
+              </div>
+            </div>
+
+            {/* Delete All button */}
+            {videoList.length > 0 && (
+              <div style={{ flexShrink: 0, marginBottom: isWide ? 12 : 8 }}>
+                <button
+                  onClick={handleDeleteAllVideos}
+                  style={{
+                    padding: isWide ? "8px 16px" : "7px 14px", borderRadius: 6, border: "1px solid var(--accent)",
+                    background: "transparent", color: "var(--accent)",
+                    fontSize: isWide ? 13 : 12, fontWeight: 600, cursor: "pointer",
+                  }}
+                >
+                  Delete All ({(videoTotalSize / 1024 / 1024).toFixed(0)} MB)
+                </button>
+              </div>
+            )}
+
+            {/* Video list */}
+            <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+              {videoLoading ? (
+                <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>Loading...</div>
+              ) : videoList.length === 0 ? (
+                <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 40, fontSize: 14 }}>No videos on server</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  {videoList.map((v) => (
+                    <div key={v.filename} style={{
+                      display: "flex", alignItems: "center", gap: isWide ? 12 : 8,
+                      padding: isWide ? "10px 8px" : "8px 4px", borderRadius: 6,
+                      borderBottom: "1px solid var(--border)",
+                    }}>
+                      <div style={{
+                        width: isWide ? 36 : 30, height: isWide ? 36 : 30, borderRadius: 6, flexShrink: 0,
+                        background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" style={{ width: isWide ? 18 : 14, height: isWide ? 18 : 14 }}>
+                          <polygon points="5,3 19,12 5,21" />
+                        </svg>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontSize: isWide ? 13 : 12, fontWeight: 600, color: "var(--text-primary)",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {v.filename}
+                        </div>
+                        <div style={{ fontSize: isWide ? 11 : 10, color: "var(--text-muted)", marginTop: 2 }}>
+                          {v.size >= 1024 * 1024 * 1024
+                            ? `${(v.size / 1024 / 1024 / 1024).toFixed(2)} GB`
+                            : `${(v.size / 1024 / 1024).toFixed(1)} MB`}
+                          <span style={{ margin: "0 6px" }}>&middot;</span>
+                          {new Date(v.modified * 1000).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteVideo(v.filename)}
+                        style={{
+                          width: isWide ? 32 : 28, height: isWide ? 32 : 28, borderRadius: 6, border: "none",
+                          background: "rgba(255,255,255,0.06)", color: "var(--text-muted)",
+                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: isWide ? 16 : 14, height: isWide ? 16 : 14 }}>
+                          <polyline points="3,6 5,6 21,6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Grid + scrollbar styling */}
       <style>{`
@@ -1201,189 +1476,5 @@ function NavBtn({ disabled, onClick, dir }: { disabled: boolean; onClick: () => 
         {dir === "prev" ? <polyline points="15,18 9,12 15,6" /> : <polyline points="9,6 15,12 9,18" />}
       </svg>
     </button>
-  );
-}
-
-// ── Music Browse ──
-
-interface MusicHistoryItem {
-  query: string;
-  title?: string;
-  timestamp: number;
-}
-
-function getMusicHistory(): MusicHistoryItem[] {
-  try {
-    return JSON.parse(localStorage.getItem("streamdesk_music_history") || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function addMusicHistory(query: string, title?: string) {
-  const history = getMusicHistory().filter((h) => h.query !== query);
-  history.unshift({ query, title, timestamp: Date.now() });
-  localStorage.setItem("streamdesk_music_history", JSON.stringify(history.slice(0, 50)));
-}
-
-function updateMusicHistoryTitle(title: string) {
-  const history = getMusicHistory();
-  if (history.length > 0 && !history[0].title) {
-    history[0].title = title;
-    localStorage.setItem("streamdesk_music_history", JSON.stringify(history));
-  }
-  return history;
-}
-
-function removeMusicHistory(query: string) {
-  const history = getMusicHistory().filter((h) => h.query !== query);
-  localStorage.setItem("streamdesk_music_history", JSON.stringify(history));
-}
-
-function MusicBrowse({ onPlayMusic }: { onPlayMusic?: (query: string) => void }) {
-  const [history, setHistory] = useState<MusicHistoryItem[]>(getMusicHistory);
-  const [searchText, setSearchText] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Listen for streamdesk_history to update the title of the most recent music entry
-  useEffect(() => {
-    const handler = (e: CustomEvent) => {
-      const title = e.detail?.title;
-      if (title) {
-        setHistory(updateMusicHistoryTitle(title));
-      }
-    };
-    window.addEventListener("streamdesk_history" as any, handler as any);
-    return () => window.removeEventListener("streamdesk_history" as any, handler as any);
-  }, []);
-
-  const handlePlay = useCallback((query: string) => {
-    addMusicHistory(query);
-    setHistory(getMusicHistory());
-    onPlayMusic?.(query);
-  }, [onPlayMusic]);
-
-  const handleSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    const q = searchText.trim();
-    if (!q) return;
-    handlePlay(q);
-    setSearchText("");
-    inputRef.current?.blur();
-  }, [searchText, handlePlay]);
-
-  const handleDelete = useCallback((query: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    removeMusicHistory(query);
-    setHistory(getMusicHistory());
-  }, []);
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Header */}
-      <div style={{ padding: "20px 24px 12px", flexShrink: 0 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.3, color: "var(--text-primary)", marginBottom: 12 }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 22, height: 22, verticalAlign: -3, marginRight: 8 }}>
-            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-          </svg>
-          Music
-        </h1>
-
-        {/* Search bar */}
-        <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
-          <input
-            ref={inputRef}
-            type="text"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="ค้นหาเพลง ศิลปิน..."
-            style={{
-              flex: 1, padding: "10px 14px", borderRadius: 8,
-              border: "1px solid var(--border)", background: "var(--bg-elevated)",
-              color: "var(--text-primary)", fontSize: 14, outline: "none",
-            }}
-          />
-          <button
-            type="submit"
-            disabled={!searchText.trim()}
-            style={{
-              padding: "10px 16px", borderRadius: 8, border: "none",
-              background: searchText.trim() ? "var(--accent)" : "var(--bg-elevated)",
-              color: searchText.trim() ? "#fff" : "var(--text-muted)",
-              fontSize: 14, fontWeight: 600, cursor: searchText.trim() ? "pointer" : "default",
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-          </button>
-        </form>
-      </div>
-
-      {/* Music History */}
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {history.length > 0 && (
-          <div style={{ padding: "8px 24px 4px", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
-            Recently Played
-          </div>
-        )}
-        {history.map((item) => (
-          <div
-            key={item.query}
-            onClick={() => handlePlay(item.query)}
-            style={{
-              display: "flex", alignItems: "center", gap: 12,
-              padding: "12px 24px", cursor: "pointer",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-          >
-            {/* Music icon */}
-            <div style={{
-              width: 40, height: 40, borderRadius: 6, background: "var(--bg-elevated)",
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" style={{ width: 20, height: 20 }}>
-                <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-              </svg>
-            </div>
-
-            {/* Title + time */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {item.title || item.query}
-              </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {item.title ? item.query + " · " : ""}{formatTimeAgo(item.timestamp)}
-              </div>
-            </div>
-
-            {/* Delete button */}
-            <button
-              onClick={(e) => handleDelete(item.query, e)}
-              style={{
-                width: 28, height: 28, borderRadius: "50%", border: "none",
-                background: "transparent", color: "var(--text-muted)",
-                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                flexShrink: 0, opacity: 0.5, transition: "opacity 0.15s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
-                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          </div>
-        ))}
-
-        {history.length === 0 && (
-          <div style={{ padding: "40px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 14 }}>
-            ค้นหาเพลงที่ต้องการฟัง
-          </div>
-        )}
-      </div>
-    </div>
   );
 }

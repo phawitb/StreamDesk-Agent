@@ -35,7 +35,7 @@ export interface PlayRequest {
 
 export interface CommandMessage {
   type: "command";
-  action: "stop" | "fullscreen" | "reset";
+  action: "stop" | "fullscreen" | "download" | "reset";
 }
 
 export interface MediaControlMessage {

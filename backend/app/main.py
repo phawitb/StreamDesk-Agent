@@ -42,6 +42,11 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(router)
 
+# Serve downloaded videos as static files
+downloads_dir = Path(__file__).parent.parent / "downloads"
+downloads_dir.mkdir(exist_ok=True)
+app.mount("/downloads", StaticFiles(directory=str(downloads_dir)), name="downloads")
+
 # Serve frontend build (must be last mount)
 frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 if frontend_dist.exists():

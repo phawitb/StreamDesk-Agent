@@ -11,9 +11,6 @@ interface Props {
   statusText?: string;
   onReplay?: () => void;
   onReload?: () => void;
-  contentMode?: "movie" | "music";
-  onNextTrack?: () => void;
-  onPrevTrack?: () => void;
 }
 
 interface MediaStatus {
@@ -35,7 +32,7 @@ function formatTime(seconds: number): string {
 
 const WAITING_STATES = new Set<string>(["launching", "navigating", "loading_player"]);
 
-export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", statusText, onReplay, onReload, contentMode = "movie", onNextTrack, onPrevTrack }: Props) {
+export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", statusText, onReplay, onReload }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: false, volume: 50, muted: false });
   const [displayTime, setDisplayTime] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -243,39 +240,19 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
 
         {/* Controls */}
         <div className="np-controls" style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          {contentMode === "music" ? (
-            <>
-              {/* Music mode: prev / next track */}
-              <button onClick={onPrevTrack} disabled={!onPrevTrack} style={controlBtn(!!onPrevTrack)} title="Previous">
-                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 18, height: 18 }}>
-                  <rect x="3" y="5" width="2.5" height="14" rx="0.5" />
-                  <path d="M20 5l-12 7 12 7V5z" />
-                </svg>
-              </button>
-              <button onClick={onNextTrack} disabled={!onNextTrack} style={controlBtn(!!onNextTrack)} title="Next">
-                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 18, height: 18 }}>
-                  <path d="M4 5l12 7-12 7V5z" />
-                  <rect x="18.5" y="5" width="2.5" height="14" rx="0.5" />
-                </svg>
-              </button>
-            </>
-          ) : (
-            <>
-              {/* Movie mode: seek backward / forward */}
-              <button onClick={() => active && onMediaControl("seek_backward", 10)} disabled={!active} style={controlBtn(active)}>
-                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
-                  <rect x="4" y="5" width="2.5" height="14" rx="0.5" />
-                  <path d="M20 5l-12 7 12 7V5z" />
-                </svg>
-              </button>
-              <button onClick={() => active && onMediaControl("seek_forward", 10)} disabled={!active} style={controlBtn(active)}>
-                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
-                  <path d="M4 5l12 7-12 7V5z" />
-                  <rect x="17.5" y="5" width="2.5" height="14" rx="0.5" />
-                </svg>
-              </button>
-            </>
-          )}
+          <button onClick={() => active && onMediaControl("seek_backward", 10)} disabled={!active} style={controlBtn(active)}>
+            <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
+              <rect x="4" y="5" width="2.5" height="14" rx="0.5" />
+              <path d="M20 5l-12 7 12 7V5z" />
+            </svg>
+          </button>
+
+          <button onClick={() => active && onMediaControl("seek_forward", 10)} disabled={!active} style={controlBtn(active)}>
+            <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16 }}>
+              <path d="M4 5l12 7-12 7V5z" />
+              <rect x="17.5" y="5" width="2.5" height="14" rx="0.5" />
+            </svg>
+          </button>
 
           {onReload && !isWaiting && (
             <button onClick={onReload} style={controlBtn(true)} title="Reload stream">

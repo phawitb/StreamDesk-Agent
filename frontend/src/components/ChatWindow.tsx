@@ -7,6 +7,8 @@ import { EpisodePicker } from "./EpisodePicker";
 interface Props {
   messages: DisplayMessage[];
   onSend: (text: string) => void;
+  onDownload?: () => void;
+  isPlaying?: boolean;
   episodes?: EpisodeInfo[] | null;
   onSelectEpisode?: (index: number) => void;
   onSelectMovie?: (url: string, poster?: string, title?: string) => void;
@@ -15,7 +17,7 @@ interface Props {
   disabled?: boolean;
 }
 
-export function ChatWindow({ messages, onSend, episodes, onSelectEpisode, onSelectMovie, seriesUrl, thinkingText, disabled }: Props) {
+export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, onSelectEpisode, onSelectMovie, seriesUrl, thinkingText, disabled }: Props) {
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<Movie[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -101,6 +103,24 @@ export function ChatWindow({ messages, onSend, episodes, onSelectEpisode, onSele
         }}
       >
         <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>Chat</h2>
+        {isPlaying && onDownload && (
+          <button
+            onClick={onDownload}
+            style={{
+              marginLeft: "auto",
+              padding: "5px 14px",
+              borderRadius: 4,
+              border: "none",
+              background: "var(--accent)",
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Download
+          </button>
+        )}
       </div>
 
       {/* Messages — flex:1 + minHeight:0 allows proper shrinking */}

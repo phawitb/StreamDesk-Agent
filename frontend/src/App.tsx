@@ -5,7 +5,6 @@ import { usePWAInstall } from "./hooks/usePWAInstall";
 import { ChatWindow } from "./components/ChatWindow";
 import { MovieBrowser } from "./components/MovieBrowser";
 import { MediaControls } from "./components/MediaControls";
-import { InAppPlayer } from "./components/InAppPlayer";
 import { saveLastEpisode } from "./components/EpisodePicker";
 import { LoginScreen } from "./components/LoginScreen";
 import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage } from "./types/messages";
@@ -40,9 +39,6 @@ function App() {
     if (stored === "inapp" || stored === "device" || stored === "url") return stored;
     return "inapp"; // default
   });
-  const [contentMode, setContentMode] = useState<"movie" | "music">(() => {
-    return (localStorage.getItem("contentMode") as "movie" | "music") || "movie";
-  });
   const [monitorFullscreen, setMonitorFullscreen] = useState(false);
   const [orientationLock, setOrientationLock] = useState<"auto" | "landscape" | "portrait">("auto");
   const [desktopMonitorExpanded, setDesktopMonitorExpanded] = useState(false);
@@ -52,9 +48,6 @@ function App() {
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
   const playingEpisodeRef = useRef(-1); // -1 = no episode (movie), 0+ = episode index
-
-  // Persist content mode
-  useEffect(() => { localStorage.setItem("contentMode", contentMode); }, [contentMode]);
 
   // Persist monitor mode and sync to backend
   useEffect(() => {
@@ -397,7 +390,7 @@ function App() {
         send({ type: "play_request", url: text, resume_position: resumePos, poster: currentPoster } as any);
         setPlayingUrl(text);
       } else {
-        send({ type: "play_request", query: text, content_mode: contentMode } as any);
+        send({ type: "play_request", query: text });
       }
       addMessage({ type: "chat", role: "user", content: text });
       if (isUrl) {
@@ -408,7 +401,7 @@ function App() {
       }
       setActiveTab("chat");
     },
-    [send, addMessage, isExternalDisconnected, contentMode]
+    [send, addMessage, isExternalDisconnected]
   );
 
   const handleSelectMovie = useCallback(
@@ -434,22 +427,8 @@ function App() {
   );
 
   const isPlaying = currentState === "playing";
-  const showMonitorTab = monitorMode === "inapp" || contentMode === "music";
+  const showMonitorTab = monitorMode === "inapp";
   const isAdmin = user?.email === "phawit.boo@gmail.com";
-
-  const handleNextTrack = useCallback(() => {
-    send({ type: "command", action: "next_track" } as any);
-  }, [send]);
-
-  const handlePrevTrack = useCallback(() => {
-    send({ type: "command", action: "prev_track" } as any);
-  }, [send]);
-
-  const handlePlayMusic = useCallback((query: string) => {
-    send({ type: "play_request", query, content_mode: "music" } as any);
-    addMessage({ type: "chat", role: "user", content: query });
-    setActiveTab("chat");
-  }, [send, addMessage]);
 
   const handleReplay = useCallback(() => {
     if (playingUrl) {
@@ -591,8 +570,6 @@ function App() {
       onFontScaleChange={handleFontScaleChange}
       forceInstall={forceInstall}
       onForceInstallChange={handleForceInstallChange}
-      contentMode={contentMode}
-      onPlayMusic={handlePlayMusic}
     />
   );
 
@@ -600,6 +577,8 @@ function App() {
     <ChatWindow
       messages={displayMessages}
       onSend={handleSend}
+      isPlaying={isPlaying}
+      onDownload={isAdmin ? () => send({ type: "command", action: "download" }) : undefined}
       episodes={episodes}
       onSelectEpisode={handleSelectEpisode}
       onSelectMovie={handleSelectMovie}
@@ -619,11 +598,10 @@ function App() {
       }}
       style={{ position: "relative" }}
     >
-      <InAppPlayer
-        style={{ pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
-        contentMode={contentMode}
-        onNextTrack={contentMode === "music" ? handleNextTrack : undefined}
-        onPrevTrack={contentMode === "music" ? handlePrevTrack : undefined}
+      <iframe
+        src="/monitorin"
+        style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
+        allow="autoplay; fullscreen"
       />
       {isDesktop ? (
         <button
@@ -735,19 +713,15 @@ function App() {
 
       {!keyboardVisible && (
         <div className="now-playing-bar">
-          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} statusText={thinkingText} onReplay={playingUrl ? handleReplay : undefined} onReload={playingUrl ? handleReplay : undefined} contentMode={contentMode} onNextTrack={contentMode === "music" ? handleNextTrack : undefined} onPrevTrack={contentMode === "music" ? handlePrevTrack : undefined} />
+          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} statusText={thinkingText} onReplay={playingUrl ? handleReplay : undefined} onReload={playingUrl ? handleReplay : undefined} />
         </div>
       )}
 
       {!keyboardVisible && !isDesktop && (
         <nav className="bottom-nav">
           <button className={`bottom-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
-            {contentMode === "music" ? (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
-            ) : (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
-            )}
-            {contentMode === "music" ? "Music" : "Movie"}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
+            Browse
           </button>
           {showMonitorTab && (
             <button className={`bottom-nav-item ${activeTab === "monitor" ? "active" : ""}`} onClick={() => setActiveTab("monitor")}>
@@ -758,23 +732,6 @@ function App() {
           <button className={`bottom-nav-item ${activeTab === "chat" ? "active" : ""}`} onClick={() => setActiveTab("chat")}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
             Chat
-          </button>
-          {/* Mode toggle */}
-          <button
-            className="bottom-nav-item"
-            onClick={() => setContentMode((m) => m === "movie" ? "music" : "movie")}
-            style={{ color: "var(--accent)" }}
-          >
-            {contentMode === "movie" ? (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 20, height: 20 }}>
-                <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 20, height: 20 }}>
-                <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M10 8v8l6-4-6-4z" />
-              </svg>
-            )}
-            {contentMode === "movie" ? "Music" : "Movie"}
           </button>
         </nav>
       )}
