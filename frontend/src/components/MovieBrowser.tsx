@@ -39,6 +39,8 @@ interface Props {
   onFontScaleChange?: (scale: number) => void;
   forceInstall?: boolean;
   onForceInstallChange?: (enabled: boolean) => void;
+  contentMode?: "movie" | "music";
+  onPlayMusic?: (query: string) => void;
 }
 
 interface WatchHistoryEntry {
@@ -91,7 +93,7 @@ function formatTimeAgo(ts: number | string): string {
   return new Date(time).toLocaleDateString();
 }
 
-export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected, user, onLogout, isAdmin, fontScale = 1, onFontScaleChange, forceInstall, onForceInstallChange }: Props) {
+export function MovieBrowser({ onSelectMovie, connected, currentState: _currentState, monitorMode = "device", onMonitorModeChange, pairedDeviceKey, onPairDevice, onUnpairDevice, monitorToken, isExternalDisconnected: _isExternalDisconnected, user, onLogout, isAdmin, fontScale = 1, onFontScaleChange, forceInstall, onForceInstallChange, contentMode = "movie", onPlayMusic }: Props) {
   const [isWide, setIsWide] = useState(() => typeof window !== "undefined" && window.innerWidth > 768 && window.innerWidth > window.innerHeight);
   useEffect(() => {
     const check = () => setIsWide(window.innerWidth > 768 && window.innerWidth > window.innerHeight);
@@ -356,6 +358,11 @@ export function MovieBrowser({ onSelectMovie, connected, currentState: _currentS
   const statusColor = isConnected ? "#46D369" : "#E50914";
   const modeLabels = { inapp: "In-App", device: "λ-Device", url: "URL" };
   const statusLabel = modeLabels[monitorMode] || "Monitor";
+
+  // ── Music Mode Browse ──
+  if (contentMode === "music") {
+    return <MusicBrowse onPlayMusic={onPlayMusic} />;
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -1476,5 +1483,167 @@ function NavBtn({ disabled, onClick, dir }: { disabled: boolean; onClick: () => 
         {dir === "prev" ? <polyline points="15,18 9,12 15,6" /> : <polyline points="9,6 15,12 9,18" />}
       </svg>
     </button>
+  );
+}
+
+// ── Music Browse ──
+
+interface MusicHistoryItem {
+  query: string;
+  timestamp: number;
+}
+
+function getMusicHistory(): MusicHistoryItem[] {
+  try {
+    return JSON.parse(localStorage.getItem("streamdesk_music_history") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function addMusicHistory(query: string) {
+  const history = getMusicHistory().filter((h) => h.query !== query);
+  history.unshift({ query, timestamp: Date.now() });
+  localStorage.setItem("streamdesk_music_history", JSON.stringify(history.slice(0, 50)));
+}
+
+function removeMusicHistory(query: string) {
+  const history = getMusicHistory().filter((h) => h.query !== query);
+  localStorage.setItem("streamdesk_music_history", JSON.stringify(history));
+}
+
+function MusicBrowse({ onPlayMusic }: { onPlayMusic?: (query: string) => void }) {
+  const [history, setHistory] = useState<MusicHistoryItem[]>(getMusicHistory);
+  const [searchText, setSearchText] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handlePlay = useCallback((query: string) => {
+    addMusicHistory(query);
+    setHistory(getMusicHistory());
+    onPlayMusic?.(query);
+  }, [onPlayMusic]);
+
+  const handleSubmit = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+    const q = searchText.trim();
+    if (!q) return;
+    handlePlay(q);
+    setSearchText("");
+    inputRef.current?.blur();
+  }, [searchText, handlePlay]);
+
+  const handleDelete = useCallback((query: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    removeMusicHistory(query);
+    setHistory(getMusicHistory());
+  }, []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* Header */}
+      <div style={{ padding: "20px 24px 12px", flexShrink: 0 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.3, color: "var(--text-primary)", marginBottom: 12 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 22, height: 22, verticalAlign: -3, marginRight: 8 }}>
+            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+          </svg>
+          Music
+        </h1>
+
+        {/* Search bar */}
+        <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="ค้นหาเพลง ศิลปิน..."
+            style={{
+              flex: 1, padding: "10px 14px", borderRadius: 8,
+              border: "1px solid var(--border)", background: "var(--bg-elevated)",
+              color: "var(--text-primary)", fontSize: 14, outline: "none",
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!searchText.trim()}
+            style={{
+              padding: "10px 16px", borderRadius: 8, border: "none",
+              background: searchText.trim() ? "var(--accent)" : "var(--bg-elevated)",
+              color: searchText.trim() ? "#fff" : "var(--text-muted)",
+              fontSize: 14, fontWeight: 600, cursor: searchText.trim() ? "pointer" : "default",
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
+        </form>
+      </div>
+
+      {/* Music History */}
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+        {history.length > 0 && (
+          <div style={{ padding: "8px 24px 4px", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Recently Played
+          </div>
+        )}
+        {history.map((item) => (
+          <div
+            key={item.query}
+            onClick={() => handlePlay(item.query)}
+            style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: "12px 24px", cursor: "pointer",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+          >
+            {/* Music icon */}
+            <div style={{
+              width: 40, height: 40, borderRadius: 6, background: "var(--bg-elevated)",
+              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" style={{ width: 20, height: 20 }}>
+                <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+              </svg>
+            </div>
+
+            {/* Title + time */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {item.query}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                {formatTimeAgo(item.timestamp)}
+              </div>
+            </div>
+
+            {/* Delete button */}
+            <button
+              onClick={(e) => handleDelete(item.query, e)}
+              style={{
+                width: 28, height: 28, borderRadius: "50%", border: "none",
+                background: "transparent", color: "var(--text-muted)",
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, opacity: 0.5, transition: "opacity 0.15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        ))}
+
+        {history.length === 0 && (
+          <div style={{ padding: "40px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 14 }}>
+            ค้นหาเพลงที่ต้องการฟัง
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

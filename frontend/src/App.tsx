@@ -445,6 +445,12 @@ function App() {
     send({ type: "command", action: "prev_track" } as any);
   }, [send]);
 
+  const handlePlayMusic = useCallback((query: string) => {
+    send({ type: "play_request", query, content_mode: "music" } as any);
+    addMessage({ type: "chat", role: "user", content: query });
+    setActiveTab("chat");
+  }, [send, addMessage]);
+
   const handleReplay = useCallback(() => {
     if (playingUrl) {
       setAutoSelectEpisode(true);
@@ -585,6 +591,8 @@ function App() {
       onFontScaleChange={handleFontScaleChange}
       forceInstall={forceInstall}
       onForceInstallChange={handleForceInstallChange}
+      contentMode={contentMode}
+      onPlayMusic={handlePlayMusic}
     />
   );
 
@@ -735,12 +743,14 @@ function App() {
 
       {!keyboardVisible && !isDesktop && (
         <nav className="bottom-nav">
-          {contentMode === "movie" && (
-            <button className={`bottom-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
+          <button className={`bottom-nav-item ${activeTab === "browse" ? "active" : ""}`} onClick={() => setActiveTab("browse")}>
+            {contentMode === "music" ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+            ) : (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" /></svg>
-              Browse
-            </button>
-          )}
+            )}
+            {contentMode === "music" ? "Music" : "Browse"}
+          </button>
           {showMonitorTab && (
             <button className={`bottom-nav-item ${activeTab === "monitor" ? "active" : ""}`} onClick={() => setActiveTab("monitor")}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
