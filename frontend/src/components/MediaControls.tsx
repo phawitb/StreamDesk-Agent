@@ -315,9 +315,6 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
         }
-        @media (min-width: 769px) {
-          .np-controls { order: -1; }
-        }
       `}</style>
     </div>
   );
