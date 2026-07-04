@@ -37,6 +37,32 @@ def _extract_json(text: str) -> Optional[dict]:
     return None
 
 
+async def detect_intent(user_query: str) -> dict:
+    """Detect if user wants music or movie, and optimize search query."""
+    if not settings.gemini_api_key:
+        return {"intent": "movie", "message": ""}
+
+    prompt = f"""ผู้ใช้พิมพ์: "{user_query}"
+
+วิเคราะห์ว่าผู้ใช้ต้องการฟังเพลง/ดู MV หรือดูหนัง/ซีรีส์ ตอบ JSON:
+{{
+  "intent": "music" หรือ "movie",
+  "search_query": "คำค้นหาที่เหมาะสมสำหรับ YouTube (ถ้า music) หรือ keyword หนัง (ถ้า movie)",
+  "message": "ข้อความตอบกลับสั้นๆ เป็นภาษาไทย"
+}}
+
+กฎ:
+- ถ้าพูดถึงเพลง ศิลปิน MV คาราโอเกะ → intent = "music"
+- ถ้าพูดถึงหนัง ซีรีส์ ดูหนัง → intent = "movie"
+- search_query สำหรับ music: ใส่ชื่อเพลง+ศิลปิน ภาษาที่ถูกต้อง เผื่อ user พิมพ์ผิด
+- ถ้าไม่แน่ใจ ให้เป็น movie"""
+
+    result = await _ask_gemini(prompt)
+    if not result:
+        return {"intent": "movie", "message": ""}
+    return result
+
+
 async def _ask_gemini(prompt: str) -> Optional[dict]:
     """Send a prompt to Gemini and return parsed JSON response."""
     payload = {
