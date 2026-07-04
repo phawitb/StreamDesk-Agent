@@ -16,7 +16,7 @@ from app.schemas.messages import (
 from app.services.agent_manager import agent_manager
 from app.services.monitor import monitor_manager
 from app.services.scraper import scrape_movies, scrape_categories, sync_all_movies
-from app.services.gemini_chat import recommend_movies
+from app.services.gemini_chat import recommend_movies, detect_intent
 from app.services.database import (
     upsert_movies, get_user_by_id, get_user_by_monitor_token, log_watch,
     log_watch_enhanced, get_user_history, update_watch_progress,
@@ -456,7 +456,21 @@ async def sync_movies():
 
 async def _handle_recommendation(query: str, user_id: int | None = None):
     try:
-        await broadcast(ChatMessage(content="กำลังค้นหาหนังที่เกี่ยวข้อง...").model_dump(), user_id)
+        # Detect intent: music or movie
+        intent_result = await detect_intent(query)
+        intent = intent_result.get("intent", "movie")
+        message = intent_result.get("message", "")
+
+        if intent == "music":
+            search_query = intent_result.get("search_query", query)
+            if message:
+                await broadcast(ChatMessage(content=message).model_dump(), user_id)
+            task = asyncio.create_task(agent_manager.play_youtube_search(search_query))
+            _play_tasks[user_id] = task
+            return
+
+        # Movie flow
+        await broadcast(ChatMessage(content=message or "กำลังค้นหาหนังที่เกี่ยวข้อง...").model_dump(), user_id)
         result = await recommend_movies(query)
         if result:
             await broadcast({

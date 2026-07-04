@@ -243,6 +243,47 @@ class AgentManager:
         await self._monitor.open_url(stream_url, title, start_time=resume_position)
         await self._report("playing", f"กำลังเล่น: {title}")
 
+    async def play_youtube_search(self, search_query: str):
+        """Search YouTube and play the top result."""
+        await self._report("launching", f"กำลังค้นหา YouTube: {search_query}...")
+
+        if not self._monitor.connected:
+            await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
+            return
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "yt-dlp", f"ytsearch1:{search_query}",
+                "--get-title", "-g", "-f", "best[ext=mp4]/best",
+                "--no-playlist",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            lines = stdout.decode().strip().split("\n")
+            lines = [l.strip() for l in lines if l.strip()]
+
+            if len(lines) < 2:
+                await self._report("error", "ไม่พบเพลงใน YouTube")
+                return
+
+            title = lines[0]
+            stream_url = lines[1]
+
+            if not stream_url.startswith("http"):
+                await self._report("error", "ไม่สามารถดึง stream URL ได้")
+                return
+
+            await self._report("loading_player", f"กำลังเปิด: {title}...")
+            await self._monitor.open_url(stream_url, title)
+            await self._report("playing", f"กำลังเล่น: {title}")
+
+        except asyncio.TimeoutError:
+            await self._report("error", "YouTube search timeout")
+        except Exception as e:
+            logger.error("YouTube search failed: %s", e)
+            await self._report("error", f"ค้นหาไม่สำเร็จ: {e}")
+
     async def _get_title_ytdlp(self, url: str) -> str:
         """Get video title using yt-dlp."""
         try:
