@@ -7,7 +7,7 @@ import { MovieBrowser } from "./components/MovieBrowser";
 import { MediaControls } from "./components/MediaControls";
 import { saveLastEpisode } from "./components/EpisodePicker";
 import { LoginScreen } from "./components/LoginScreen";
-import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage } from "./types/messages";
+import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage, MusicResultsMessage } from "./types/messages";
 import "./App.css";
 
 /** Progress key: "url" for movies, "url::ep0" for series episodes */
@@ -274,7 +274,7 @@ function App() {
   const displayMessages = useMemo<DisplayMessage[]>(() => {
     return messages
       .filter((m) => {
-        if (m.type === "chat" || m.type === "error" || m.type === "movie_recommendations") return true;
+        if (m.type === "chat" || m.type === "error" || m.type === "movie_recommendations" || m.type === "music_results") return true;
         if (m.type === "status") {
           const state = (m as { state: string }).state;
           return SHOW_IN_CHAT_STATES.has(state);
@@ -291,6 +291,10 @@ function App() {
         if (m.type === "movie_recommendations") {
           const rec = m as MovieRecommendationMessage;
           return { id: `rec-${i}`, role: "assistant" as const, content: rec.message, timestamp: new Date(), recommendations: rec.movies };
+        }
+        if (m.type === "music_results") {
+          const mus = m as MusicResultsMessage;
+          return { id: `music-${i}`, role: "assistant" as const, content: mus.message, timestamp: new Date(), musicResults: mus.results };
         }
         return { id: `err-${i}`, role: "system" as const, content: `Error: ${m.message}`, timestamp: new Date() };
       });
@@ -399,6 +403,28 @@ function App() {
           setCurrentPoster(`https://img.youtube.com/vi/${ytMatch[1]}/mqdefault.jpg`);
         }
       }
+      setActiveTab("chat");
+    },
+    [send, addMessage, isExternalDisconnected]
+  );
+
+  const handlePlayMusic = useCallback(
+    (url: string, thumbnail: string, title: string) => {
+      if (isExternalDisconnected) {
+        addMessage({
+          type: "chat",
+          role: "assistant",
+          content: "โปรดเชื่อมต่อจอก่อน หรือปรับเป็นโหมด In-App (Settings > Monitor Mode)",
+        });
+        setActiveTab("chat");
+        return;
+      }
+      playingEpisodeRef.current = -1;
+      const resumePos = getResumePos(url, -1);
+      send({ type: "play_request", url, resume_position: resumePos, poster: thumbnail, title } as any);
+      setPlayingUrl(url);
+      setCurrentPoster(thumbnail);
+      addMessage({ type: "chat", role: "user", content: title });
       setActiveTab("chat");
     },
     [send, addMessage, isExternalDisconnected]
@@ -582,6 +608,7 @@ function App() {
       episodes={episodes}
       onSelectEpisode={handleSelectEpisode}
       onSelectMovie={handleSelectMovie}
+      onPlayMusic={handlePlayMusic}
       seriesUrl={playingUrl}
       thinkingText={thinkingText}
       disabled={isExternalDisconnected}

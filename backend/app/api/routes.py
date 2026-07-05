@@ -461,12 +461,24 @@ async def _handle_recommendation(query: str, user_id: int | None = None):
         intent = intent_result.get("intent", "movie")
         message = intent_result.get("message", "")
 
-        if intent == "music":
+        if intent in ("music", "youtube"):
             search_query = intent_result.get("search_query", query)
             if message:
                 await broadcast(ChatMessage(content=message).model_dump(), user_id)
-            task = asyncio.create_task(agent_manager.play_youtube_search(search_query))
-            _play_tasks[user_id] = task
+            # Search YouTube and send results for user to choose
+            await broadcast(
+                StatusMessage(state=AgentState("launching"), message=f"กำลังค้นหา YouTube: {search_query}...").model_dump(),
+                user_id,
+            )
+            results = await agent_manager.search_youtube(search_query, 10)
+            if results:
+                await broadcast({
+                    "type": "music_results",
+                    "message": message or f"ผลการค้นหา: {search_query}",
+                    "results": results,
+                }, user_id)
+            else:
+                await broadcast(ChatMessage(content="ไม่พบเพลงใน YouTube").model_dump(), user_id)
             return
 
         # Movie flow
@@ -574,9 +586,10 @@ async def websocket_endpoint(ws: WebSocket):
 
                     await broadcast(ChatMessage(content=f"รับคำสั่งแล้ว กำลังเปิด: {url}").model_dump(), user_id)
                     poster = msg.get("poster", "")
+                    title = msg.get("title", "")
                     user = await get_user_by_id(user_id)
                     if user:
-                        asyncio.create_task(log_watch_enhanced(user["email"], url, poster=poster))
+                        asyncio.create_task(log_watch_enhanced(user["email"], url, title=title, poster=poster))
                     resume_pos = float(msg.get("resume_position", 0))
                     task = asyncio.create_task(agent_manager.play(url, resume_position=resume_pos))
                     _play_tasks[user_id] = task

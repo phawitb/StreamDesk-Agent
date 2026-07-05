@@ -100,24 +100,25 @@ async def _search_website(keywords: list[str]) -> list[dict]:
 async def detect_intent(user_query: str) -> dict:
     """
     Detect if user wants music or movie.
-    Returns: {"intent": "music"|"movie", "search_query": "optimized YouTube search query"}
+    Returns: {"intent": "music"|"movie", "search_query": "...", "num_results": 1-5}
     """
     if not settings.gemini_api_key:
         return {"intent": "movie", "search_query": user_query}
 
     prompt = f"""ผู้ใช้พิมพ์: "{user_query}"
 
-วิเคราะห์ว่าผู้ใช้ต้องการฟังเพลง/ดู MV หรือต้องการดูหนัง/ซีรีส์ แล้วตอบ JSON:
+วิเคราะห์ว่าผู้ใช้ต้องการอะไร แล้วตอบ JSON:
 {{
-  "intent": "music" หรือ "movie",
-  "search_query": "คำค้นหาที่เหมาะสมสำหรับ YouTube (กรณีเพลง)",
+  "intent": "music" หรือ "youtube" หรือ "movie",
+  "search_query": "คำค้นหาที่เหมาะสมสำหรับ YouTube (กรณี music/youtube)",
   "message": "ข้อความตอบกลับสั้นๆ เป็นภาษาไทยเป็นกันเอง"
 }}
 
 กฎ:
 - intent="music" ถ้าผู้ใช้ต้องการฟังเพลง เปิดเพลง เล่นเพลง ดู MV หรือพูดถึงศิลปิน/วง/นักร้อง
-- intent="movie" ถ้าผู้ใช้ต้องการดูหนัง ซีรีส์ anime การ์ตูน
-- search_query: แก้คำผิด ใส่ชื่อเพลง+ศิลปินให้ถูกต้อง เพิ่ม "official" หรือ "MV" ถ้าเหมาะสม เพื่อให้ค้นหาใน YouTube ได้แม่นยำ
+- intent="youtube" ถ้าผู้ใช้พูดถึง YouTube หรือต้องการค้นหา/ดูคลิปใน YouTube (ไม่จำเป็นต้องเป็นเพลง อาจเป็นคลิปทั่วไป รีวิว สารคดี ฯลฯ)
+- intent="movie" ถ้าผู้ใช้ต้องการดูหนัง ซีรีส์ anime การ์ตูน (ไม่ได้พูดถึง YouTube)
+- search_query: แก้คำผิด สร้างคำค้นที่เหมาะสมสำหรับ YouTube เพิ่ม "official" หรือ "MV" ถ้าเป็นเพลง
 - ถ้าไม่แน่ใจ ให้เดาจากบริบท"""
 
     result = await _ask_gemini(prompt)

@@ -84,9 +84,22 @@ export interface MovieRecommendationMessage {
   movies: RecommendedMovie[];
 }
 
+export interface MusicResult {
+  video_id: string;
+  title: string;
+  url: string;
+  thumbnail: string;
+}
+
+export interface MusicResultsMessage {
+  type: "music_results";
+  message: string;
+  results: MusicResult[];
+}
+
 export type ClientMessage = PlayRequest | CommandMessage | MediaControlMessage | SelectEpisodeMessage;
 
-export type ServerMessage = StatusMessage | ChatMessage | ErrorMessage | MediaStatusMessage | EpisodeListMessage | MovieRecommendationMessage;
+export type ServerMessage = StatusMessage | ChatMessage | ErrorMessage | MediaStatusMessage | EpisodeListMessage | MovieRecommendationMessage | MusicResultsMessage;
 
 export interface DisplayMessage {
   id: string;
@@ -95,4 +108,5 @@ export interface DisplayMessage {
   timestamp: Date;
   state?: AgentState;
   recommendations?: RecommendedMovie[];
+  musicResults?: MusicResult[];
 }

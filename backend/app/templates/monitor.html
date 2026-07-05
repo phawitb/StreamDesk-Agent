@@ -280,7 +280,6 @@
                     currentMediaTitle = cmd.title || '';
                     pendingStartTime = cmd.start_time || 0;
                     openMedia(cmd.url, cmd.platform || '');
-                    if (cmd.title) showToast(cmd.title);
                     break;
                 case 'PLAY':        doPlay(); showToast('Playing'); break;
                 case 'PAUSE':       doPause(); showToast('Paused'); break;

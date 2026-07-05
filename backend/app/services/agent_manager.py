@@ -243,6 +243,37 @@ class AgentManager:
         await self._monitor.open_url(stream_url, title, start_time=resume_position)
         await self._report("playing", f"กำลังเล่น: {title}")
 
+    async def search_youtube(self, search_query: str, num_results: int = 3) -> list[dict]:
+        """Search YouTube and return results with video IDs, titles, and thumbnails."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "yt-dlp", f"ytsearch{num_results}:{search_query}",
+                "--print", "%(id)s\t%(title)s",
+                "--no-playlist", "--flat-playlist",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            results = []
+            for line in stdout.decode().strip().split("\n"):
+                line = line.strip()
+                if not line or "\t" not in line:
+                    continue
+                video_id, title = line.split("\t", 1)
+                results.append({
+                    "video_id": video_id,
+                    "title": title,
+                    "url": f"https://www.youtube.com/watch?v={video_id}",
+                    "thumbnail": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
+                })
+            return results
+        except asyncio.TimeoutError:
+            logger.error("YouTube search timeout")
+            return []
+        except Exception as e:
+            logger.error("YouTube search failed: %s", e)
+            return []
+
     async def play_youtube_search(self, search_query: str):
         """Search YouTube and play the top result."""
         await self._report("launching", f"กำลังค้นหา YouTube: {search_query}...")

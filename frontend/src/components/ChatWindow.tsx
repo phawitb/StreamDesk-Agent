@@ -12,12 +12,13 @@ interface Props {
   episodes?: EpisodeInfo[] | null;
   onSelectEpisode?: (index: number) => void;
   onSelectMovie?: (url: string, poster?: string, title?: string) => void;
+  onPlayMusic?: (url: string, thumbnail: string, title: string) => void;
   seriesUrl?: string;
   thinkingText?: string;
   disabled?: boolean;
 }
 
-export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, onSelectEpisode, onSelectMovie, seriesUrl, thinkingText, disabled }: Props) {
+export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, onSelectEpisode, onSelectMovie, onPlayMusic, seriesUrl, thinkingText, disabled }: Props) {
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<Movie[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -184,6 +185,59 @@ export function ChatWindow({ messages, onSend, onDownload, isPlaying, episodes, 
                         {movie.rating && <span style={{ color: "#46D369" }}>{movie.rating}</span>}
                         {movie.quality && <span>{movie.quality}</span>}
                         {movie.language && <span>{movie.language}</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {msg.musicResults && msg.musicResults.length > 0 && (
+              <div style={{ padding: "4px 12px 8px" }}>
+                {msg.musicResults.map((track, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => onPlayMusic?.(track.url, track.thumbnail, track.title)}
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      padding: 8,
+                      marginBottom: 4,
+                      background: "var(--bg-elevated)",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-highlight)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "var(--bg-elevated)")}
+                  >
+                    <div style={{
+                      width: 72, height: 40, borderRadius: 4, overflow: "hidden",
+                      flexShrink: 0, position: "relative", background: "#000",
+                    }}>
+                      <img
+                        src={track.thumbnail}
+                        alt={track.title}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                      <div style={{
+                        position: "absolute", inset: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        background: "rgba(0,0,0,0.3)",
+                      }}>
+                        <svg viewBox="0 0 24 24" fill="#fff" style={{ width: 16, height: 16, opacity: 0.9 }}>
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", flex: 1 }}>
+                      <div style={{
+                        fontSize: 13, fontWeight: 600, color: "var(--text-primary)",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {track.title}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>
+                        YouTube
                       </div>
                     </div>
                   </div>
