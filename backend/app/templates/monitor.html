@@ -93,6 +93,8 @@
     </style>
     <!-- QR code library (lightweight, no deps) -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <!-- HLS.js for m3u8 playback on Chrome -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 </head>
 <body>
     <!-- Idle screen (before WS connects) -->
@@ -160,6 +162,7 @@
         let currentMediaUrl = '';
         let currentMediaTitle = '';
 
+        let hlsInstance = null;
         let mediaMode = 'none'; // 'none' | 'video' | 'embed'
         let monitorActive = true; // true = external active (play), false = inapp active (standby)
         let wasPlayingBeforeStandby = false;
@@ -355,36 +358,76 @@
             videoPlayer.classList.remove('hidden');
             embedPlayer.classList.add('hidden');
             videoPlayer.volume = currentVolume / 100;
-            videoPlayer.src = url;
             videoPlayer.muted = isMuted;
 
-            // Resume from saved position
-            if (pendingStartTime > 0) {
-                const resumeTime = pendingStartTime;
-                pendingStartTime = 0;
-                videoPlayer.addEventListener('loadeddata', () => {
-                    if (resumeTime < videoPlayer.duration) {
+            const isHLS = url.includes('.m3u8');
+
+            if (isHLS && typeof Hls !== 'undefined' && Hls.isSupported()) {
+                // Use hls.js for m3u8 on Chrome/Firefox/etc.
+                if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+                hlsInstance = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60 });
+                hlsInstance.loadSource(url);
+                hlsInstance.attachMedia(videoPlayer);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                    if (pendingStartTime > 0) {
+                        const resumeTime = pendingStartTime;
+                        pendingStartTime = 0;
                         videoPlayer.currentTime = resumeTime;
                     }
-                }, { once: true });
+                    startPlayback();
+                });
+                hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) {
+                        console.error('HLS fatal error:', data.type, data.details);
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            hlsInstance.startLoad();
+                        } else {
+                            hlsInstance.destroy();
+                            hlsInstance = null;
+                        }
+                    }
+                });
+            } else if (isHLS && videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS (Safari, iOS, Android)
+                videoPlayer.src = url;
+                setupResume();
+                startPlayback();
+            } else {
+                // Direct mp4/webm
+                videoPlayer.src = url;
+                setupResume();
+                startPlayback();
             }
 
-            videoPlayer.play().catch(e => {
-                console.error('Autoplay blocked, trying muted:', e.message);
-                // Fallback: play muted, then unmute on first user interaction
-                videoPlayer.muted = true;
-                videoPlayer.play().then(() => {
-                    showToast('Tap screen to unmute');
-                    const unmute = () => {
-                        videoPlayer.muted = isMuted;
-                        showToast('Unmuted');
-                        document.removeEventListener('click', unmute);
-                    };
-                    document.addEventListener('click', unmute, { once: true });
-                }).catch(() => {
-                    showToast('Tap screen to start playback');
+            function setupResume() {
+                if (pendingStartTime > 0) {
+                    const resumeTime = pendingStartTime;
+                    pendingStartTime = 0;
+                    videoPlayer.addEventListener('loadeddata', () => {
+                        if (resumeTime < videoPlayer.duration) {
+                            videoPlayer.currentTime = resumeTime;
+                        }
+                    }, { once: true });
+                }
+            }
+
+            function startPlayback() {
+                videoPlayer.play().catch(e => {
+                    console.error('Autoplay blocked, trying muted:', e.message);
+                    videoPlayer.muted = true;
+                    videoPlayer.play().then(() => {
+                        showToast('Tap screen to unmute');
+                        const unmute = () => {
+                            videoPlayer.muted = isMuted;
+                            showToast('Unmuted');
+                            document.removeEventListener('click', unmute);
+                        };
+                        document.addEventListener('click', unmute, { once: true });
+                    }).catch(() => {
+                        showToast('Tap screen to start playback');
+                    });
                 });
-            });
+            }
         }
 
         // ── Embed player (iframe) ──
@@ -400,6 +443,7 @@
         // ── Cleanup ──
 
         function cleanup() {
+            if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
             videoPlayer.pause();
             videoPlayer.removeAttribute('src');
             videoPlayer.load();
