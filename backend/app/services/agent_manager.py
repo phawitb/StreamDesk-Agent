@@ -238,7 +238,7 @@ class AgentManager:
         title = await self._get_title_ytdlp(url)
         await self._report("loading_player", f"กำลังโหลด: {title}...")
 
-        stream_url = await self._extract_stream_ytdlp(url, quality=0)
+        stream_url = await self._extract_stream_ytdlp(url, quality=720)
         if not stream_url:
             await self._report("error", "ไม่สามารถดึง stream URL ได้")
             return
