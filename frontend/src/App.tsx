@@ -5,6 +5,7 @@ import { usePWAInstall } from "./hooks/usePWAInstall";
 import { ChatWindow } from "./components/ChatWindow";
 import { MovieBrowser } from "./components/MovieBrowser";
 import { MediaControls } from "./components/MediaControls";
+import { RemoteControl } from "./components/RemoteControl";
 import { saveLastEpisode } from "./components/EpisodePicker";
 import { LoginScreen } from "./components/LoginScreen";
 import type { AgentState, DisplayMessage, EpisodeInfo, EpisodeListMessage, MovieRecommendationMessage, MusicResultsMessage } from "./types/messages";
@@ -453,7 +454,7 @@ function App() {
   );
 
   const isPlaying = currentState === "playing";
-  const showMonitorTab = monitorMode === "inapp";
+  const showMonitorTab = true; // Always show monitor tab
   const isAdmin = user?.email === "phawit.boo@gmail.com";
 
   const handleReplay = useCallback(() => {
@@ -616,89 +617,97 @@ function App() {
   );
 
   const monitorPanel = showMonitorTab ? (
-    <div
-      className={`panel-monitor${desktopMonitorExpanded ? " desktop-expanded" : ""}`}
-      onClick={() => {
-        if (!isDesktop && activeTab === "monitor" && !effectiveLandscape) {
-          setMonitorFullscreen((f) => !f);
-        }
-      }}
-      style={{ position: "relative" }}
-    >
-      <iframe
-        src="/monitorin"
-        style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
-        allow="autoplay; fullscreen"
-      />
-      {isDesktop ? (
-        <button
-          onClick={(e) => { e.stopPropagation(); setDesktopMonitorExpanded((v) => !v); }}
-          style={{
-            position: "absolute", top: 8, right: 8, zIndex: 10,
-            width: 32, height: 32, borderRadius: 6, border: "none",
-            background: "rgba(0,0,0,0.6)", color: "#fff",
-            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-            backdropFilter: "blur(4px)", opacity: 0.7, transition: "opacity 0.2s",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.7"; }}
-          title={desktopMonitorExpanded ? "Exit fullscreen" : "Fullscreen"}
-        >
-          {desktopMonitorExpanded ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
-              <polyline points="4,14 10,14 10,20" /><polyline points="20,10 14,10 14,4" />
-              <line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
-              <polyline points="15,3 21,3 21,9" /><polyline points="9,21 3,21 3,15" />
-              <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
-            </svg>
-          )}
-        </button>
-      ) : activeTab === "monitor" && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            // Cycle: auto → landscape → portrait → auto
-            setOrientationLock((prev) => {
-              if (prev === "auto") return "landscape";
-              if (prev === "landscape") return "portrait";
-              return "auto";
-            });
-          }}
-          style={{
-            position: "absolute", top: 8, right: 8, zIndex: 210,
-            width: 36, height: 36, borderRadius: 8, border: "none",
-            background: "rgba(0,0,0,0.6)", color: orientationLock === "auto" ? "rgba(255,255,255,0.7)" : "#fff",
-            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-            backdropFilter: "blur(4px)", transition: "opacity 0.2s",
-          }}
-          title={orientationLock === "auto" ? "Auto rotation" : orientationLock === "landscape" ? "Landscape (locked)" : "Portrait (locked)"}
-        >
-          {orientationLock === "landscape" ? (
-            /* Landscape icon — wide rectangle */
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-              <rect x="1" y="5" width="22" height="14" rx="2" />
-              <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
-            </svg>
-          ) : orientationLock === "portrait" ? (
-            /* Portrait icon — tall rectangle */
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-              <rect x="5" y="1" width="14" height="22" rx="2" />
-              <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
-            </svg>
-          ) : (
-            /* Auto rotation icon */
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
-              <path d="M21 12a9 9 0 01-9 9m-9-9a9 9 0 019-9" />
-              <polyline points="21,3 21,9 15,9" />
-              <polyline points="3,21 3,15 9,15" />
-            </svg>
-          )}
-        </button>
-      )}
-    </div>
+    monitorMode === "inapp" ? (
+      <div
+        className={`panel-monitor${desktopMonitorExpanded ? " desktop-expanded" : ""}`}
+        onClick={() => {
+          if (!isDesktop && activeTab === "monitor" && !effectiveLandscape) {
+            setMonitorFullscreen((f) => !f);
+          }
+        }}
+        style={{ position: "relative" }}
+      >
+        <iframe
+          src="/monitorin"
+          style={{ width: "100%", height: "100%", border: "none", background: "#000", pointerEvents: monitorIsFullscreen ? "none" : "auto" }}
+          allow="autoplay; fullscreen"
+        />
+        {isDesktop ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); setDesktopMonitorExpanded((v) => !v); }}
+            style={{
+              position: "absolute", top: 8, right: 8, zIndex: 10,
+              width: 32, height: 32, borderRadius: 6, border: "none",
+              background: "rgba(0,0,0,0.6)", color: "#fff",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              backdropFilter: "blur(4px)", opacity: 0.7, transition: "opacity 0.2s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.7"; }}
+            title={desktopMonitorExpanded ? "Exit fullscreen" : "Fullscreen"}
+          >
+            {desktopMonitorExpanded ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                <polyline points="4,14 10,14 10,20" /><polyline points="20,10 14,10 14,4" />
+                <line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                <polyline points="15,3 21,3 21,9" /><polyline points="9,21 3,21 3,15" />
+                <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            )}
+          </button>
+        ) : activeTab === "monitor" && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setOrientationLock((prev) => {
+                if (prev === "auto") return "landscape";
+                if (prev === "landscape") return "portrait";
+                return "auto";
+              });
+            }}
+            style={{
+              position: "absolute", top: 8, right: 8, zIndex: 210,
+              width: 36, height: 36, borderRadius: 8, border: "none",
+              background: "rgba(0,0,0,0.6)", color: orientationLock === "auto" ? "rgba(255,255,255,0.7)" : "#fff",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              backdropFilter: "blur(4px)", transition: "opacity 0.2s",
+            }}
+            title={orientationLock === "auto" ? "Auto rotation" : orientationLock === "landscape" ? "Landscape (locked)" : "Portrait (locked)"}
+          >
+            {orientationLock === "landscape" ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                <rect x="1" y="5" width="22" height="14" rx="2" />
+                <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+              </svg>
+            ) : orientationLock === "portrait" ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                <rect x="5" y="1" width="14" height="22" rx="2" />
+                <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                <path d="M21 12a9 9 0 01-9 9m-9-9a9 9 0 019-9" />
+                <polyline points="21,3 21,9 15,9" />
+                <polyline points="3,21 3,15 9,15" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
+    ) : (
+      /* External monitor mode — show remote control with big buttons */
+      <div className="panel-monitor" style={{ position: "relative" }}>
+        <RemoteControl
+          onMediaControl={handleMediaControl}
+          title={currentTitle}
+          poster={currentPoster}
+          isPlaying={isPlaying}
+        />
+      </div>
+    )
   ) : null;
 
   return (
