@@ -31,6 +31,38 @@ def _extract_bg_image(style_block: str, item_id: str) -> Optional[str]:
     return None
 
 
+async def _fetch_posters_wp_api(post_ids: list[str]) -> dict[str, str]:
+    """Fetch featured image URLs from WP REST API for given post IDs.
+    Returns {post_id: poster_url} mapping."""
+    result = {}
+    if not post_ids:
+        return result
+    # WP API accepts up to 100 IDs per request
+    ids_str = ",".join(post_ids[:100])
+    api_url = f"{BASE_URL}/wp-json/wp/v2/posts?include={ids_str}&_embed=wp:featuredmedia&per_page=100"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(api_url, headers={"User-Agent": USER_AGENT})
+            resp.raise_for_status()
+        for post in resp.json():
+            pid = str(post.get("id", ""))
+            embedded = post.get("_embedded", {})
+            media_list = embedded.get("wp:featuredmedia", [])
+            if media_list and isinstance(media_list[0], dict):
+                sizes = media_list[0].get("media_details", {}).get("sizes", {})
+                # Prefer vip24hd-card (180x270), then medium, then source_url
+                if "vip24hd-card" in sizes:
+                    result[pid] = sizes["vip24hd-card"]["source_url"]
+                elif "medium" in sizes:
+                    result[pid] = sizes["medium"]["source_url"]
+                else:
+                    result[pid] = media_list[0].get("source_url", "")
+        logger.info("WP API fetched %d/%d posters", len(result), len(post_ids))
+    except Exception as e:
+        logger.warning("WP API poster fetch failed: %s", e)
+    return result
+
+
 async def scrape_movies(page: int = 1, category: str = "", search: str = "") -> dict:
     """
     Scrape movie listing from 24hd.net.
@@ -156,12 +188,22 @@ async def scrape_movies(page: int = 1, category: str = "", search: str = "") -> 
             "rating": rating,
             "quality": quality,
             "language": language,
+            "_item_id": item_id,
         })
+
+    # Fetch missing posters via WP REST API (item_id = WP post ID)
+    missing = [(i, m) for i, m in enumerate(movies) if not m.get("poster") and m.get("_item_id")]
+    if missing:
+        poster_map = await _fetch_posters_wp_api([m["_item_id"] for _, m in missing])
+        for i, m in missing:
+            if m["_item_id"] in poster_map:
+                movies[i]["poster"] = poster_map[m["_item_id"]]
 
     # Deduplicate by URL
     seen_urls = set()
     unique_movies = []
     for m in movies:
+        m.pop("_item_id", None)
         if m["url"] not in seen_urls:
             seen_urls.add(m["url"])
             unique_movies.append(m)

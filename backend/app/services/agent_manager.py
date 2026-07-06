@@ -240,7 +240,7 @@ class AgentManager:
 
         stream_url = await self._extract_stream_ytdlp(url, quality=self._current_youtube_quality)
         if not stream_url:
-            await self._report("error", "ไม่สามารถดึง stream URL ได้")
+            await self._report("error", "ไม่สามารถดึง stream URL จาก YouTube ได้ — ลองอีกครั้ง")
             return
 
         await self._monitor.open_url(stream_url, title, start_time=resume_position)
