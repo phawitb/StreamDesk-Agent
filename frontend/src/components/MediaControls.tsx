@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentState } from "../types/messages";
 
-const QUALITIES = [360, 480, 720, 1080];
+const QUALITIES = [0, 360, 480, 720, 1080];
+
+function qualityLabel(q: number): string {
+  return q === 0 ? "SD" : `${q}p`;
+}
 
 interface Props {
   onMediaControl: (action: string, value?: number) => void;
@@ -276,9 +280,9 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
                 onQualityChange(next);
               }}
               style={{ ...controlBtn(true), fontSize: 10, fontWeight: 700, color: "var(--text-secondary)" }}
-              title={`Quality: ${currentQuality}p`}
+              title={`Quality: ${qualityLabel(currentQuality)}`}
             >
-              {currentQuality}p
+              {qualityLabel(currentQuality)}
             </button>
           )}
 

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const QUALITIES = [360, 480, 720, 1080];
+const QUALITIES = [0, 360, 480, 720, 1080];
+
+function qualityLabel(q: number): string {
+  return q === 0 ? "SD" : `${q}p`;
+}
 
 interface Props {
   onMediaControl: (action: string, value?: number) => void;
@@ -239,7 +243,7 @@ export function RemoteControl({ onMediaControl, title, poster, isPlaying, isYouT
                 transition: "background 0.15s",
               }}
             >
-              {q}p
+              {qualityLabel(q)}
             </button>
           ))}
         </div>

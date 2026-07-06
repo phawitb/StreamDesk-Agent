@@ -238,7 +238,7 @@ class AgentManager:
         title = await self._get_title_ytdlp(url)
         await self._report("loading_player", f"กำลังโหลด: {title}...")
 
-        stream_url = await self._extract_stream_ytdlp(url, quality=self._current_youtube_quality)
+        stream_url = await self._extract_stream_ytdlp(url, quality=0)
         if not stream_url:
             await self._report("error", "ไม่สามารถดึง stream URL ได้")
             return
@@ -352,10 +352,15 @@ class AgentManager:
             logger.warning("yt-dlp get-title failed: %s", e)
             return url
 
-    async def _extract_stream_ytdlp(self, url: str, quality: int = 720) -> Optional[str]:
-        """Extract direct stream URL using yt-dlp. Prefers HLS (m3u8) for quality selection."""
-        # Try m3u8 combined stream at requested quality (works with hls.js)
-        fmt = f"best[height<={quality}][protocol*=m3u8]/best[ext=mp4]/best"
+    async def _extract_stream_ytdlp(self, url: str, quality: int = 0) -> Optional[str]:
+        """Extract direct stream URL using yt-dlp.
+        quality=0: fast mp4 (360p, instant start)
+        quality>0: HLS m3u8 at specified height (slower start, HD)
+        """
+        if quality > 0:
+            fmt = f"best[height<={quality}][protocol*=m3u8]/best[ext=mp4]/best"
+        else:
+            fmt = "best[ext=mp4]/best"
         try:
             proc = await asyncio.create_subprocess_exec(
                 "yt-dlp", "-g", "-f", fmt, "--no-playlist", url,
@@ -365,7 +370,7 @@ class AgentManager:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
             lines = [l for l in stdout.decode().strip().split("\n") if l.startswith("http")]
             if len(lines) == 1:
-                logger.info("yt-dlp extracted (%dp): %s", quality, lines[0][:120])
+                logger.info("yt-dlp extracted (q=%d): %s", quality, lines[0][:120])
                 return lines[0]
         except Exception as e:
             logger.warning("yt-dlp extract failed: %s", e)

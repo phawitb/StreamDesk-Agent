@@ -677,10 +677,11 @@ async def websocket_endpoint(ws: WebSocket):
                 elif action == "unmute":
                     await ctrl.unmute()
                 elif action == "set_quality":
-                    quality = int(value) if value else 720
+                    quality = int(value) if value else 0
                     async def _change_quality(q=quality):
+                        qlabel = "SD" if q == 0 else f"{q}p"
                         await broadcast(
-                            StatusMessage(state=AgentState("loading_player"), message=f"กำลังเปลี่ยนความชัดเป็น {q}p...").model_dump(),
+                            StatusMessage(state=AgentState("loading_player"), message=f"กำลังเปลี่ยนความชัดเป็น {qlabel}...").model_dump(),
                             user_id,
                         )
                         ok = await agent_manager.change_youtube_quality(q)

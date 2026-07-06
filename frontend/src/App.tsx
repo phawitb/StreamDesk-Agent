@@ -40,7 +40,7 @@ function App() {
     if (stored === "inapp" || stored === "device" || stored === "url") return stored;
     return "inapp"; // default
   });
-  const [currentQuality, setCurrentQuality] = useState(720);
+  const [currentQuality, setCurrentQuality] = useState(0);
   const [monitorFullscreen, setMonitorFullscreen] = useState(false);
   const [orientationLock, setOrientationLock] = useState<"auto" | "landscape" | "portrait">("auto");
   const [desktopMonitorExpanded, setDesktopMonitorExpanded] = useState(false);
