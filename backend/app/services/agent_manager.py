@@ -65,6 +65,8 @@ class AgentManager:
         self._cached_stream_url: Optional[str] = None
         self._preselected_episode: Optional[int] = None  # Skip episode picker if set
         self._episode_resume_position: float = 0  # Resume position from episode selection
+        self._current_youtube_url: Optional[str] = None  # For quality switching
+        self._current_youtube_quality: int = 720  # Default quality
 
     def set_user(self, user_id: int):
         self._user_id = user_id
@@ -232,16 +234,36 @@ class AgentManager:
             await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
             return
 
+        self._current_youtube_url = url
         title = await self._get_title_ytdlp(url)
         await self._report("loading_player", f"กำลังโหลด: {title}...")
 
-        stream_url = await self._extract_stream_ytdlp(url)
+        stream_url = await self._extract_stream_ytdlp(url, quality=self._current_youtube_quality)
         if not stream_url:
             await self._report("error", "ไม่สามารถดึง stream URL ได้")
             return
 
         await self._monitor.open_url(stream_url, title, start_time=resume_position)
         await self._report("playing", f"กำลังเล่น: {title}")
+
+    async def change_youtube_quality(self, quality: int) -> bool:
+        """Change YouTube quality and re-extract stream URL."""
+        if not self._current_youtube_url:
+            return False
+        if not self._monitor.connected:
+            return False
+
+        self._current_youtube_quality = quality
+        # Get current position to resume
+        pos = self._monitor.status.get("position", 0)
+        title = self._monitor.status.get("title", "")
+
+        stream_url = await self._extract_stream_ytdlp(self._current_youtube_url, quality=quality)
+        if not stream_url:
+            return False
+
+        await self._monitor.open_url(stream_url, title, start_time=pos)
+        return True
 
     async def search_youtube(self, search_query: str, num_results: int = 3) -> list[dict]:
         """Search YouTube and return results with video IDs, titles, and thumbnails."""
@@ -330,20 +352,20 @@ class AgentManager:
             logger.warning("yt-dlp get-title failed: %s", e)
             return url
 
-    async def _extract_stream_ytdlp(self, url: str) -> Optional[str]:
-        """Extract direct stream URL using yt-dlp. Returns single URL or None."""
+    async def _extract_stream_ytdlp(self, url: str, quality: int = 720) -> Optional[str]:
+        """Extract direct stream URL using yt-dlp. Prefers HLS (m3u8) for quality selection."""
+        # Try m3u8 combined stream at requested quality (works with hls.js)
+        fmt = f"best[height<={quality}][protocol*=m3u8]/best[ext=mp4]/best"
         try:
             proc = await asyncio.create_subprocess_exec(
-                "yt-dlp", "-g", "-f", "best[ext=mp4]/best", "--no-playlist", url,
+                "yt-dlp", "-g", "-f", fmt, "--no-playlist", url,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
             lines = [l for l in stdout.decode().strip().split("\n") if l.startswith("http")]
-            # Only return if we get exactly 1 URL (combined stream).
-            # If 2+ URLs, video/audio are separate — can't play directly.
             if len(lines) == 1:
-                logger.info("yt-dlp extracted: %s", lines[0][:120])
+                logger.info("yt-dlp extracted (%dp): %s", quality, lines[0][:120])
                 return lines[0]
         except Exception as e:
             logger.warning("yt-dlp extract failed: %s", e)

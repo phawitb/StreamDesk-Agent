@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+const QUALITIES = [360, 480, 720, 1080];
+
 interface Props {
   onMediaControl: (action: string, value?: number) => void;
   title?: string;
   poster?: string;
   isPlaying?: boolean;
+  isYouTube?: boolean;
+  currentQuality?: number;
+  onQualityChange?: (quality: number) => void;
 }
 
 interface MediaStatus {
@@ -24,7 +29,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function RemoteControl({ onMediaControl, title, poster, isPlaying }: Props) {
+export function RemoteControl({ onMediaControl, title, poster, isPlaying, isYouTube, currentQuality = 720, onQualityChange }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: true, volume: 50, muted: false });
   const [displayTime, setDisplayTime] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -218,6 +223,27 @@ export function RemoteControl({ onMediaControl, title, poster, isPlaying }: Prop
           {status.muted ? "Mute" : `${status.volume}%`}
         </span>
       </div>
+
+      {/* Quality selector — YouTube only */}
+      {isYouTube && active && onQualityChange && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          {QUALITIES.map((q) => (
+            <button
+              key={q}
+              onClick={() => onQualityChange(q)}
+              style={{
+                padding: "6px 14px", borderRadius: 20, border: "none",
+                background: q === currentQuality ? "var(--accent)" : "var(--bg-elevated)",
+                color: q === currentQuality ? "#fff" : "var(--text-secondary)",
+                fontSize: 13, fontWeight: 600, cursor: "pointer",
+                transition: "background 0.15s",
+              }}
+            >
+              {q}p
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

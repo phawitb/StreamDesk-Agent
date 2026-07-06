@@ -40,6 +40,7 @@ function App() {
     if (stored === "inapp" || stored === "device" || stored === "url") return stored;
     return "inapp"; // default
   });
+  const [currentQuality, setCurrentQuality] = useState(720);
   const [monitorFullscreen, setMonitorFullscreen] = useState(false);
   const [orientationLock, setOrientationLock] = useState<"auto" | "landscape" | "portrait">("auto");
   const [desktopMonitorExpanded, setDesktopMonitorExpanded] = useState(false);
@@ -311,6 +312,21 @@ function App() {
     }
     return "";
   }, [messages]);
+
+  // Track quality changes from server
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last && (last as any).type === "quality_changed") {
+      setCurrentQuality((last as any).quality);
+    }
+  }, [messages]);
+
+  const isYouTube = playingUrl.includes("youtube.com") || playingUrl.includes("youtu.be");
+
+  const handleQualityChange = useCallback((quality: number) => {
+    setCurrentQuality(quality);
+    send({ type: "media_control", action: "set_quality", value: quality } as any);
+  }, [send]);
 
   const currentState = useMemo<AgentState>(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -705,6 +721,9 @@ function App() {
           title={currentTitle}
           poster={currentPoster}
           isPlaying={isPlaying}
+          isYouTube={isYouTube}
+          currentQuality={currentQuality}
+          onQualityChange={handleQualityChange}
         />
       </div>
     )
@@ -749,7 +768,7 @@ function App() {
 
       {!keyboardVisible && (
         <div className="now-playing-bar">
-          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} statusText={thinkingText} onReplay={playingUrl ? handleReplay : undefined} onReload={playingUrl ? handleReplay : undefined} />
+          <MediaControls onMediaControl={handleMediaControl} title={currentTitle} poster={currentPoster} isPlaying={isPlaying} monitorMode={monitorMode} currentState={currentState} statusText={thinkingText} onReplay={playingUrl ? handleReplay : undefined} onReload={playingUrl ? handleReplay : undefined} isYouTube={isYouTube} currentQuality={currentQuality} onQualityChange={handleQualityChange} />
         </div>
       )}
 

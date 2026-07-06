@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentState } from "../types/messages";
 
+const QUALITIES = [360, 480, 720, 1080];
+
 interface Props {
   onMediaControl: (action: string, value?: number) => void;
   title?: string;
@@ -11,6 +13,9 @@ interface Props {
   statusText?: string;
   onReplay?: () => void;
   onReload?: () => void;
+  isYouTube?: boolean;
+  currentQuality?: number;
+  onQualityChange?: (quality: number) => void;
 }
 
 interface MediaStatus {
@@ -32,7 +37,7 @@ function formatTime(seconds: number): string {
 
 const WAITING_STATES = new Set<string>(["launching", "navigating", "loading_player"]);
 
-export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", statusText, onReplay, onReload }: Props) {
+export function MediaControls({ onMediaControl, title, poster, isPlaying, monitorMode = "device", currentState = "idle", statusText, onReplay, onReload, isYouTube, currentQuality = 720, onQualityChange }: Props) {
   const [status, setStatus] = useState<MediaStatus>({ currentTime: 0, duration: 0, paused: false, volume: 50, muted: false });
   const [displayTime, setDisplayTime] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -259,6 +264,21 @@ export function MediaControls({ onMediaControl, title, poster, isPlaying, monito
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
                 <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
               </svg>
+            </button>
+          )}
+
+          {/* Quality selector — YouTube only */}
+          {isYouTube && active && onQualityChange && (
+            <button
+              onClick={() => {
+                const idx = QUALITIES.indexOf(currentQuality);
+                const next = QUALITIES[(idx + 1) % QUALITIES.length];
+                onQualityChange(next);
+              }}
+              style={{ ...controlBtn(true), fontSize: 10, fontWeight: 700, color: "var(--text-secondary)" }}
+              title={`Quality: ${currentQuality}p`}
+            >
+              {currentQuality}p
             </button>
           )}
 

@@ -676,6 +676,19 @@ async def websocket_endpoint(ws: WebSocket):
                     await ctrl.mute()
                 elif action == "unmute":
                     await ctrl.unmute()
+                elif action == "set_quality":
+                    quality = int(value) if value else 720
+                    async def _change_quality(q=quality):
+                        await broadcast(
+                            StatusMessage(state=AgentState("loading_player"), message=f"กำลังเปลี่ยนความชัดเป็น {q}p...").model_dump(),
+                            user_id,
+                        )
+                        ok = await agent_manager.change_youtube_quality(q)
+                        if ok:
+                            await broadcast({"type": "quality_changed", "quality": q}, user_id)
+                        else:
+                            await broadcast(ChatMessage(content="ไม่สามารถเปลี่ยนความชัดได้").model_dump(), user_id)
+                    asyncio.create_task(_change_quality())
 
     except WebSocketDisconnect:
         pass
