@@ -237,7 +237,7 @@ class AgentManager:
 
         stream_url = await self._extract_stream_ytdlp(url)
         if not stream_url:
-            await self._report("error", "ไม่สามารถดึง stream URL ได้")
+            await self._report("error", "ไม่สามารถดึง stream URL จาก YouTube ได้ — ลองอีกครั้ง")
             return
 
         await self._monitor.open_url(stream_url, title, start_time=resume_position)
@@ -331,22 +331,46 @@ class AgentManager:
             return url
 
     async def _extract_stream_ytdlp(self, url: str) -> Optional[str]:
-        """Extract direct stream URL using yt-dlp. Returns single URL or None."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "yt-dlp", "-g", "-f", "best[ext=mp4]/best", "--no-playlist", url,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-            lines = [l for l in stdout.decode().strip().split("\n") if l.startswith("http")]
-            # Only return if we get exactly 1 URL (combined stream).
-            # If 2+ URLs, video/audio are separate — can't play directly.
-            if len(lines) == 1:
-                logger.info("yt-dlp extracted: %s", lines[0][:120])
-                return lines[0]
-        except Exception as e:
-            logger.warning("yt-dlp extract failed: %s", e)
+        """Extract direct stream URL using yt-dlp with fallback format selectors."""
+        # YouTube HLS (m3u8) URLs are blocked by CORS in browsers,
+        # so we must use protocol=https to get direct URLs.
+        # Combined (video+audio) https formats on YouTube are limited to 360p (format 18).
+        # For higher quality, we accept separate video-only streams — browser can play video-only.
+        format_selectors = [
+            # 1) Best combined mp4 via https (usually 360p format 18)
+            "best[ext=mp4][protocol=https]",
+            # 2) Best video-only mp4 via https (up to 4K, no audio)
+            "bestvideo[ext=mp4][protocol=https][height<=1080]",
+            # 3) Any combined format via https
+            "best[protocol=https]",
+            # 4) Fallback — format 18 explicitly
+            "18",
+        ]
+        for fmt in format_selectors:
+            for attempt in range(2):
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "yt-dlp", "-g", "-f", fmt, "--no-playlist", url,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+                    lines = [l for l in stdout.decode().strip().split("\n") if l.startswith("http")]
+                    if len(lines) == 1:
+                        logger.info("yt-dlp extracted (fmt=%s, attempt=%d): %s", fmt, attempt, lines[0][:120])
+                        return lines[0]
+                    if len(lines) >= 2:
+                        logger.info("yt-dlp returned %d URLs (separate streams) with fmt=%s, trying next", len(lines), fmt)
+                        break  # Don't retry same format if it consistently gives separate streams
+                    # No URLs returned — might be transient, retry
+                    err_msg = stderr.decode().strip()[-200:] if stderr else ""
+                    logger.warning("yt-dlp no URLs (fmt=%s, attempt=%d): %s", fmt, attempt, err_msg)
+                except asyncio.TimeoutError:
+                    logger.warning("yt-dlp timeout (fmt=%s, attempt=%d)", fmt, attempt)
+                except Exception as e:
+                    logger.warning("yt-dlp extract failed (fmt=%s, attempt=%d): %s", fmt, attempt, e)
+                if attempt == 0:
+                    await asyncio.sleep(1)
         return None
 
     async def _test_m3u8_url(self, url: str) -> bool:

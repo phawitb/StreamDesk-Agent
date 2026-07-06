@@ -393,8 +393,48 @@
                 setupResume();
                 startPlayback();
             } else {
-                // Direct mp4/webm
+                // Direct mp4/webm (e.g. YouTube extracted URL)
                 videoPlayer.src = url;
+                let retryCount = 0;
+                const maxRetries = 2;
+                videoPlayer.addEventListener('error', () => {
+                    const err = videoPlayer.error;
+                    console.error('Video error:', err?.code, err?.message);
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        showToast('Video error, retrying... (' + retryCount + ')');
+                        setTimeout(() => {
+                            videoPlayer.src = url;
+                            videoPlayer.load();
+                            videoPlayer.play().catch(() => {});
+                        }, 1500 * retryCount);
+                    } else {
+                        showToast('Video failed to load');
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'playback_error', error: err?.message || 'unknown' }));
+                        }
+                    }
+                }, { once: false });
+                // Handle stall/hang — if no progress for 15s, retry
+                let stallTimer = null;
+                videoPlayer.addEventListener('playing', () => {
+                    clearTimeout(stallTimer);
+                });
+                videoPlayer.addEventListener('waiting', () => {
+                    clearTimeout(stallTimer);
+                    stallTimer = setTimeout(() => {
+                        if (videoPlayer.paused || videoPlayer.ended) return;
+                        if (retryCount < maxRetries) {
+                            retryCount++;
+                            showToast('Video stalled, retrying... (' + retryCount + ')');
+                            const currentPos = videoPlayer.currentTime;
+                            videoPlayer.src = url;
+                            videoPlayer.load();
+                            videoPlayer.currentTime = currentPos;
+                            videoPlayer.play().catch(() => {});
+                        }
+                    }, 15000);
+                });
                 setupResume();
                 startPlayback();
             }
