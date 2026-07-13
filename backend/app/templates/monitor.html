@@ -65,6 +65,42 @@
         #embed-player { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
         #embed-player.hidden { display: none; }
 
+        
+        /* ── Stream URL bar ── */
+        #stream-url-bar {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: rgba(10,10,26,0.85); backdrop-filter: blur(10px);
+            border-top: 1px solid rgba(99,102,241,0.2);
+            padding: 10px 20px; z-index: 50;
+            display: none; flex-direction: column; gap: 6px;
+            transition: transform 0.3s ease;
+        }
+        #stream-url-bar.show { display: flex; }
+        .url-row { display: flex; align-items: center; gap: 10px; }
+        #stream-url-bar .url-label {
+            color: #64748b; font-size: 12px; white-space: nowrap;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            min-width: 55px;
+        }
+        #stream-url-bar a {
+            color: #818cf8; font-size: 13px; text-decoration: none;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            flex: 1; font-family: monospace;
+        }
+        #stream-url-bar a:hover { color: #a5b4fc; text-decoration: underline; }
+        #stream-url-bar .copy-btn {
+            background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3);
+            color: #818cf8; border-radius: 6px; padding: 4px 12px;
+            font-size: 12px; cursor: pointer; white-space: nowrap;
+        }
+        #stream-url-bar .copy-btn:hover { background: rgba(99,102,241,0.25); }
+        #stream-url-bar .close-btn {
+            position: absolute; top: 8px; right: 12px;
+            background: none; border: none; color: #475569;
+            font-size: 18px; cursor: pointer; padding: 0 4px;
+        }
+        #stream-url-bar .close-btn:hover { color: #94a3b8; }
+
         /* ── Tap to activate overlay ── */
         #activate-overlay {
             position: fixed; inset: 0; z-index: 200;
@@ -146,6 +182,22 @@
     <div id="media-container" class="hidden">
         <video id="video-player" class="hidden" playsinline preload="auto" controls></video>
         <iframe id="embed-player" class="hidden" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+    </div>
+
+    
+    <!-- Stream URL bar -->
+    <div id="stream-url-bar">
+        <div class="url-row" id="source-row">
+            <span class="url-label">Source</span>
+            <a id="source-url-link" href="#"></a>
+            <button class="copy-btn" onclick="copyUrl('source')">Copy</button>
+        </div>
+        <div class="url-row" id="stream-row">
+            <span class="url-label">Stream</span>
+            <a id="stream-url-link" href="#"></a>
+            <button class="copy-btn" onclick="copyUrl('stream')">Copy</button>
+        </div>
+        <button class="close-btn" onclick="hideStreamBar()">&times;</button>
     </div>
 
     <div id="toast"></div>
@@ -283,10 +335,11 @@
                     currentMediaTitle = cmd.title || '';
                     pendingStartTime = cmd.start_time || 0;
                     openMedia(cmd.url, cmd.platform || '');
+                    showStreamUrl(cmd.url, cmd.source_url || '');
                     break;
                 case 'PLAY':        doPlay(); showToast('Playing'); break;
                 case 'PAUSE':       doPause(); showToast('Paused'); break;
-                case 'STOP':        doStop(); showToast('Stopped'); break;
+                case 'STOP':        doStop(); hideStreamBar(); showToast('Stopped'); break;
                 case 'SEEK_FORWARD':  doSeek(cmd.value || 10); showToast(`+${cmd.value||10}s`); break;
                 case 'SEEK_BACKWARD': doSeek(-(cmd.value || 10)); showToast(`-${cmd.value||10}s`); break;
                 case 'SEEK_TO':     doSeekTo(cmd.value || 0); break;
@@ -592,6 +645,93 @@
             o.classList.add('show');
             clearTimeout(volumeTimeout);
             volumeTimeout = setTimeout(() => o.classList.remove('show'), 2000);
+        }
+
+        // ── Wake Lock — prevents screen/tab sleeping on Android ──
+        let wakeLock = null;
+        async function requestWakeLock() {
+            try {
+                if ("wakeLock" in navigator) {
+                    wakeLock = await navigator.wakeLock.request("screen");
+                    console.log("Wake Lock acquired");
+                    wakeLock.addEventListener("release", () => {
+                        console.log("Wake Lock released, re-acquiring...");
+                        setTimeout(requestWakeLock, 1000);
+                    });
+                }
+            } catch (e) { console.warn("Wake Lock failed:", e); }
+        }
+        requestWakeLock();
+        // Re-acquire wake lock when page becomes visible again
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") requestWakeLock();
+        });
+
+        // ── Anti-discard: periodic activity to prevent Chrome memory saver ──
+        setInterval(() => {
+            // Tiny DOM interaction keeps Chrome from discarding this tab
+            document.title = "StreamDesk" + (mediaMode === "video" && !videoPlayer.paused ? " ▶" : "");
+        }, 30000);
+
+        
+        // ── Stream URL bar ──
+        let currentStreamUrl = '';
+        let currentSourceUrl = '';
+        const streamUrlBar = document.getElementById('stream-url-bar');
+        const streamUrlLink = document.getElementById('stream-url-link');
+        const sourceUrlLink = document.getElementById('source-url-link');
+        const sourceRow = document.getElementById('source-row');
+        const streamRow = document.getElementById('stream-row');
+
+        function showStreamUrl(streamUrl, sourceUrl) {
+            currentStreamUrl = streamUrl || '';
+            currentSourceUrl = sourceUrl || '';
+            if (!currentStreamUrl && !currentSourceUrl) { hideStreamBar(); return; }
+            // Source URL (website) — opens in new tab
+            if (currentSourceUrl) {
+                sourceUrlLink.href = currentSourceUrl;
+                sourceUrlLink.textContent = currentSourceUrl;
+                sourceUrlLink.onclick = function(e) {
+                    e.preventDefault();
+                    window.location.href = currentSourceUrl;
+                };
+                sourceRow.style.display = 'flex';
+            } else {
+                sourceRow.style.display = 'none';
+            }
+            // Stream URL (m3u8/mp4) — navigates same tab
+            if (currentStreamUrl) {
+                streamUrlLink.href = currentStreamUrl;
+                streamUrlLink.textContent = currentStreamUrl;
+                streamUrlLink.onclick = function(e) {
+                    e.preventDefault();
+                    window.location.href = currentStreamUrl;
+                };
+                streamRow.style.display = 'flex';
+            } else {
+                streamRow.style.display = 'none';
+            }
+            streamUrlBar.classList.add('show');
+        }
+
+        function hideStreamBar() {
+            streamUrlBar.classList.remove('show');
+        }
+
+        function copyUrl(type) {
+            const url = type === 'source' ? currentSourceUrl : currentStreamUrl;
+            if (!url) return;
+            navigator.clipboard.writeText(url).then(() => {
+                showToast('Copied ' + type + ' URL');
+            }).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = url;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('Copied ' + type + ' URL');
+            });
         }
 
         // Hide cursor after inactivity

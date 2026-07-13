@@ -21,6 +21,7 @@ class MonitorController:
             "muted": False,
             "duration": 0.0,
             "position": 0.0,
+            "source_url": "",
         }
 
     @property
@@ -62,6 +63,7 @@ class MonitorController:
                 "action": "OPEN_URL",
                 "url": self._status["url"],
                 "title": self._status.get("title", ""),
+                "source_url": self._status.get("source_url", ""),
             })
             if self._status.get("position", 0) > 0:
                 await self._send_to(mode, {
@@ -111,17 +113,20 @@ class MonitorController:
         if data.get("title"):
             self._status["title"] = data["title"]
 
-    async def open_url(self, url: str, title: str = "", platform: str = "", start_time: float = 0) -> None:
+    async def open_url(self, url: str, title: str = "", platform: str = "", start_time: float = 0, source_url: str = "") -> None:
         logger.info("Opening on monitor: %s (%s) platform=%s start=%.0f", title, url[:80], platform, start_time)
         cmd = {"action": "OPEN_URL", "url": url, "title": title}
         if platform:
             cmd["platform"] = platform
         if start_time > 0:
             cmd["start_time"] = start_time
+        if source_url:
+            cmd["source_url"] = source_url
         await self._send(cmd)
         self._status["playing"] = True
         self._status["title"] = title
         self._status["url"] = url
+        self._status["source_url"] = source_url
 
     async def play(self) -> None:
         await self._send({"action": "PLAY"})
