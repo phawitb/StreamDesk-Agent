@@ -243,7 +243,7 @@ class AgentManager:
             await self._report("error", "ไม่สามารถดึง stream URL จาก YouTube ได้ — ลองอีกครั้ง")
             return
 
-        await self._monitor.open_url(stream_url, title, start_time=resume_position)
+        await self._monitor.open_url(stream_url, title, start_time=resume_position, source_url=url)
         await self._report("playing", f"กำลังเล่น: {title}")
 
     async def change_youtube_quality(self, quality: int) -> bool:
@@ -328,7 +328,7 @@ class AgentManager:
                 return
 
             await self._report("loading_player", f"กำลังเปิด: {title}...")
-            await self._monitor.open_url(stream_url, title)
+            await self._monitor.open_url(stream_url, title, source_url=stream_url)
             await self._report("playing", f"กำลังเล่น: {title}")
 
         except asyncio.TimeoutError:
@@ -415,7 +415,7 @@ class AgentManager:
                 await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
                 return True  # Return True to stop further processing
             self._current_title = await self._get_cached_title(url, episode_index)
-            await self._monitor.open_url(cached, self._current_title, start_time=resume_position)
+            await self._monitor.open_url(cached, self._current_title, start_time=resume_position, source_url=self._current_url or "")
             await self._monitor.unmute()
             await self._report("playing", f"กำลังเล่น: {self._current_title}")
             logger.info("Playing from cached stream: %s", cached[:120])
@@ -501,7 +501,7 @@ class AgentManager:
                     return
 
                 ep_resume = self._episode_resume_position or resume_position
-                await self._monitor.open_url(m3u8_url, self._current_title, start_time=ep_resume)
+                await self._monitor.open_url(m3u8_url, self._current_title, start_time=ep_resume, source_url=self._current_url or "")
                 await self._monitor.unmute()
                 await self._report("playing", f"กำลังเล่น: {self._current_title} (จาก cache)")
                 return
@@ -529,7 +529,7 @@ class AgentManager:
                     await self._report("error", "ไม่มี monitor เชื่อมต่อ เปิด /monitor ก่อน")
                     return
 
-                await self._monitor.open_url(m3u8_url, self._current_title, start_time=resume_position)
+                await self._monitor.open_url(m3u8_url, self._current_title, start_time=resume_position, source_url=url)
                 await self._monitor.unmute()
                 await self._report("playing", f"กำลังเล่น: {self._current_title}")
 
